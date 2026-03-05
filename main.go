@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 )
 
@@ -151,6 +152,17 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("%s: %v\n", k, v)
 	}
 
-	w.Write([]byte("Login successful. Check server logs."))
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": claims["sub"],
+		"exp": token.Expiry.Unix(),
+	})
+
+	signedToken, err := jwtToken.SignedString([]byte("your-secret-key"))
+	if err != nil {
+		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
+		return
+	}
+
+	println("Generated JWT:", signedToken)
 
 }

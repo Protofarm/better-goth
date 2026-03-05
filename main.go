@@ -5,51 +5,50 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"strings"
 
-	"github.com/Protofarm/better-goth/providers"
 	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 )
 
 type Auth struct {
-	Google   *providers.GoogleProvider
-	Verifier *oidc.IDTokenVerifier
+	Providers map[string]Provider
+}
+type Provider interface {
+	Name() string
+	Config() *oauth2.Config
+	Verifier() *oidc.IDTokenVerifier
 }
 
 func RegisterRoutes(mux *http.ServeMux, auth *Auth) {
-	mux.HandleFunc("/api/auth/", auth.authHandler)
-	mux.HandleFunc("/callback/", auth.callbackHandler)
+	mux.HandleFunc("GET /api/auth/{provider}", auth.authHandler)
+	mux.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
 }
 
 func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 
-	provider := strings.TrimPrefix(r.URL.Path, "/api/auth/")
+	providerName := r.PathValue("provider")
 
-	switch provider {
-
-	case "google":
-
-		state, err := generateState()
-		if err != nil {
-			http.Error(w, "failed to generate state", http.StatusInternalServerError)
-			return
-		}
-
-		http.SetCookie(w, &http.Cookie{
-			Name:     "oauth_state",
-			Value:    state,
-			Path:     "/",
-			HttpOnly: true,
-			Secure:   false,
-		})
-
-		authURL := a.Google.Config.AuthCodeURL(state)
-
-		http.Redirect(w, r, authURL, http.StatusFound)
-
-	default:
+	provider, ok := a.Providers[providerName]
+	if !ok {
 		http.NotFound(w, r)
+		return
 	}
+	state, err := generateState()
+	if err != nil {
+		http.Error(w, "failed to generate state", http.StatusInternalServerError)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+	})
+	authURL := provider.Config().AuthCodeURL(state, oauth2.AccessTypeOffline)
+
+	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
 func generateState() (string, error) {
@@ -64,6 +63,13 @@ func generateState() (string, error) {
 }
 
 func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
+	providerName := r.PathValue("provider")
+
+	provider, ok := a.Providers[providerName]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
 
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
@@ -91,48 +97,41 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		MaxAge: -1,
 	})
 
-	switch {
-
-	case a.Google != nil:
-
-		token, err := a.Google.Config.Exchange(r.Context(), code)
-		if err != nil {
-			http.Error(w, "failed to exchange token", http.StatusInternalServerError)
-			return
-		}
-
-		rawIDToken, ok := token.Extra("id_token").(string)
-		if !ok {
-			http.Error(w, "no id_token field", http.StatusInternalServerError)
-			return
-		}
-
-		idToken, err := a.Google.Verifier.Verify(r.Context(), rawIDToken)
-		if err != nil {
-			http.Error(w, "failed to verify id_token", http.StatusInternalServerError)
-			return
-		}
-
-		var claims map[string]interface{}
-
-		if err := idToken.Claims(&claims); err != nil {
-			http.Error(w, "failed to parse claims", http.StatusInternalServerError)
-			return
-		}
-
-		println("OAuth Login Success")
-		println("Access Token:", token.AccessToken)
-		println("Refresh Token:", token.RefreshToken)
-		println("Expiry:", token.Expiry.String())
-
-		println("User Claims:")
-		for k, v := range claims {
-			fmt.Printf("%s: %v\n", k, v)
-		}
-
-		w.Write([]byte("Login successful. Check server logs."))
-
-	default:
-		http.Error(w, "no provider configured", http.StatusInternalServerError)
+	token, err := provider.Config().Exchange(r.Context(), code)
+	if err != nil {
+		http.Error(w, "failed to exchange token", http.StatusInternalServerError)
+		return
 	}
+
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		http.Error(w, "no id_token field", http.StatusInternalServerError)
+		return
+	}
+
+	idToken, err := provider.Verifier().Verify(r.Context(), rawIDToken)
+	if err != nil {
+		http.Error(w, "failed to verify id_token", http.StatusInternalServerError)
+		return
+	}
+
+	var claims map[string]interface{}
+
+	if err := idToken.Claims(&claims); err != nil {
+		http.Error(w, "failed to parse claims", http.StatusInternalServerError)
+		return
+	}
+
+	println("OAuth Login Success")
+	println("Access Token:", token.AccessToken)
+	println("Refresh Token:", token.RefreshToken)
+	println("Expiry:", token.Expiry.String())
+
+	println("User Claims:")
+	for k, v := range claims {
+		fmt.Printf("%s: %v\n", k, v)
+	}
+
+	w.Write([]byte("Login successful. Check server logs."))
+
 }

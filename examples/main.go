@@ -33,7 +33,9 @@ func main() {
 	}
 
 	auth := &bettergoth.Auth{
-		Google: google,
+		Providers: map[string]bettergoth.Provider{
+			"google": google,
+		},
 	}
 
 	bettergoth.RegisterRoutes(mux, auth)

@@ -8,20 +8,20 @@ import (
 )
 
 type GoogleProvider struct {
-	Config   *oauth2.Config
-	Verifier *oidc.IDTokenVerifier
+	config   *oauth2.Config
+	verifier *oidc.IDTokenVerifier
 }
 
 func NewGoogleProvider(clientID, clientSecret, redirectURL string, scopes []string) (*GoogleProvider, error) {
+
 	provider, err := oidc.NewProvider(context.Background(), "https://accounts.google.com")
+	if err != nil {
+		return nil, err
+	}
 
 	verifier := provider.Verifier(&oidc.Config{
 		ClientID: clientID,
 	})
-
-	if err != nil {
-		return nil, err
-	}
 
 	cfg := &oauth2.Config{
 		ClientID:     clientID,
@@ -32,7 +32,19 @@ func NewGoogleProvider(clientID, clientSecret, redirectURL string, scopes []stri
 	}
 
 	return &GoogleProvider{
-		Config:   cfg,
-		Verifier: verifier,
+		config:   cfg,
+		verifier: verifier,
 	}, nil
+}
+
+func (p *GoogleProvider) Name() string {
+	return "google"
+}
+
+func (p *GoogleProvider) Config() *oauth2.Config {
+	return p.config
+}
+
+func (p *GoogleProvider) Verifier() *oidc.IDTokenVerifier {
+	return p.verifier
 }

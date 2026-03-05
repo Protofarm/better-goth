@@ -13,10 +13,29 @@ import (
 type Auth struct {
 	Providers map[string]Provider
 }
+
 type Provider interface {
 	Name() string
 	Config() *oauth2.Config
 	Verifier() *oidc.IDTokenVerifier
+}
+
+func NewAuth() *Auth {
+	return &Auth{
+		Providers: map[string]Provider{},
+	}
+}
+
+func (a *Auth) AddProvider(provider Provider) {
+	if provider == nil {
+		return
+	}
+
+	if a.Providers == nil {
+		a.Providers = map[string]Provider{}
+	}
+
+	a.Providers[provider.Name()] = provider
 }
 
 func RegisterRoutes(mux *http.ServeMux, auth *Auth) {

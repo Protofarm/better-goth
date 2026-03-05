@@ -32,11 +32,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	auth := &bettergoth.Auth{
-		Providers: map[string]bettergoth.Provider{
-			"google": google,
-		},
-	}
+	auth := bettergoth.NewAuth()
+	auth.AddProvider(google)
+
+	// Example custom provider (OIDC issuer based):
+	// custom, err := providers.NewProvider(
+	// 	"myprovider",
+	// 	"https://issuer.example.com",
+	// 	os.Getenv("MY_PROVIDER_CLIENT_ID"),
+	// 	os.Getenv("MY_PROVIDER_CLIENT_SECRET"),
+	// 	"http://localhost:8080/callback/myprovider",
+	// 	[]string{"offline_access"},
+	// )
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	// auth.AddProvider(custom)
 
 	bettergoth.RegisterRoutes(mux, auth)
 

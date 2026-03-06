@@ -2,6 +2,7 @@ package bettergoth
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -21,9 +22,24 @@ var (
 	ErrWeakJWTSecret    = errors.New("jwt secret must be at least 32 bytes")
 )
 
+type UserHandler interface {
+	HandleUser(ctx context.Context, user *pb.User) error
+}
+
+type UserHandlerFunc func(context.Context, *pb.User) error
+
+func (f UserHandlerFunc) HandleUser(ctx context.Context, user *pb.User) error {
+	return f(ctx, user)
+}
+
 type Auth struct {
-	Providers map[string]Provider
-	jwtSecret []byte
+	Providers   map[string]Provider
+	jwtSecret   []byte
+	userHandler UserHandler
+}
+
+func (a *Auth) SetUserHandler(h UserHandler) {
+	a.userHandler = h
 }
 
 type Provider interface {
@@ -182,9 +198,6 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing subject claim", http.StatusInternalServerError)
 		return
 	}
-	for k, v := range claims {
-		println(k, ":", v)
-	}
 	signedToken, err := a.signJWT(subject, token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
@@ -206,7 +219,12 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		Jwt:           signedToken,
 	}
 
-	println("User info:", u.String())
+	if a.userHandler != nil {
+		if err := a.userHandler.HandleUser(r.Context(), u); err != nil {
+			http.Error(w, "failed to handle user", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(signedToken))

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 
 	bettergoth "github.com/Protofarm/better-goth"
+	"github.com/Protofarm/better-goth/pb"
 	"github.com/Protofarm/better-goth/providers"
 	"github.com/joho/godotenv"
 )
@@ -37,6 +39,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	auth.SetUserHandler(bettergoth.UserHandlerFunc(func(ctx context.Context, user *pb.User) error {
+		log.Printf("authenticated user: %s", user.String())
+		return nil
+	}))
 
 	auth.AddProvider(google)
 

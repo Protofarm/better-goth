@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "./pb";
+
+message User {
+  string picture = 1;
+  double iat = 2;
+  double exp = 3;
+  string iss = 4;
+  string azp = 5;
+  bool email_verified = 6;
+  string name = 7;
+  string given_name = 8;
+  string aud = 9;
+  string sub = 10;
+  string email = 11;
+  string at_hash = 12;
+  string jwt = 13;
+}

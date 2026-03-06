@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Protofarm/better-goth/pb"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
@@ -59,6 +60,7 @@ func (a *Auth) AddProvider(provider Provider) {
 }
 
 func RegisterRoutes(mux *http.ServeMux, auth *Auth) {
+	println("Registering auth routes")
 	mux.HandleFunc("GET /api/auth/{provider}", auth.authHandler)
 	mux.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
 }
@@ -180,12 +182,31 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing subject claim", http.StatusInternalServerError)
 		return
 	}
-
+	for k, v := range claims {
+		println(k, ":", v)
+	}
 	signedToken, err := a.signJWT(subject, token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
 		return
 	}
+	u := &pb.User{
+		Picture:       claims["picture"].(string),
+		Iat:           claims["iat"].(float64),
+		Exp:           claims["exp"].(float64),
+		Iss:           claims["iss"].(string),
+		Azp:           claims["azp"].(string),
+		EmailVerified: claims["email_verified"].(bool),
+		Name:          claims["name"].(string),
+		GivenName:     claims["given_name"].(string),
+		Aud:           claims["aud"].(string),
+		Sub:           subject,
+		Email:         claims["email"].(string),
+		AtHash:        claims["at_hash"].(string),
+		Jwt:           signedToken,
+	}
+
+	println("User info:", u.String())
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(signedToken))

@@ -1,18 +1,28 @@
 package bettergoth
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
-	"fmt"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 )
 
+const minJWTSecretBytes = 32
+
+var (
+	ErrMissingJWTSecret = errors.New("jwt secret is required")
+	ErrWeakJWTSecret    = errors.New("jwt secret must be at least 32 bytes")
+)
+
 type Auth struct {
 	Providers map[string]Provider
+	jwtSecret []byte
 }
 
 type Provider interface {
@@ -21,10 +31,19 @@ type Provider interface {
 	Verifier() *oidc.IDTokenVerifier
 }
 
-func NewAuth() *Auth {
+func NewAuth(secret []byte) (*Auth, error) {
+	if len(bytes.TrimSpace(secret)) == 0 {
+		return nil, ErrMissingJWTSecret
+	}
+
+	if len(secret) < minJWTSecretBytes {
+		return nil, ErrWeakJWTSecret
+	}
+
 	return &Auth{
 		Providers: map[string]Provider{},
-	}
+		jwtSecret: append([]byte(nil), secret...),
+	}, nil
 }
 
 func (a *Auth) AddProvider(provider Provider) {
@@ -80,6 +99,20 @@ func generateState() (string, error) {
 	}
 
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func (a *Auth) signJWT(subject string, expiresAt time.Time) (string, error) {
+	if len(a.jwtSecret) == 0 {
+		return "", ErrMissingJWTSecret
+	}
+
+	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Subject:   subject,
+		ExpiresAt: jwt.NewNumericDate(expiresAt.UTC()),
+		IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+	})
+
+	return jwtToken.SignedString(a.jwtSecret)
 }
 
 func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
@@ -142,27 +175,19 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	println("OAuth Login Success")
-	println("Access Token:", token.AccessToken)
-	println("Refresh Token:", token.RefreshToken)
-	println("Expiry:", token.Expiry.String())
-
-	println("User Claims:")
-	for k, v := range claims {
-		fmt.Printf("%s: %v\n", k, v)
+	subject, ok := claims["sub"].(string)
+	if !ok || subject == "" {
+		http.Error(w, "missing subject claim", http.StatusInternalServerError)
+		return
 	}
 
-	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": claims["sub"],
-		"exp": token.Expiry.Unix(),
-	})
-
-	signedToken, err := jwtToken.SignedString([]byte("your-secret-key"))
+	signedToken, err := a.signJWT(subject, token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
 		return
 	}
 
-	println("Generated JWT:", signedToken)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write([]byte(signedToken))
 
 }

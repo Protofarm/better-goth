@@ -20,6 +20,7 @@ func main() {
 	}
 	clientid := os.Getenv("GOOGLE_CLIENT_ID")
 	clientsecret := os.Getenv("GOOGLE_CLIENT_SECRET")
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	google, err := providers.NewGoogleProvider(
 		clientid,
@@ -32,7 +33,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	auth := bettergoth.NewAuth()
+	auth, err := bettergoth.NewAuth([]byte(jwtSecret))
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	auth.AddProvider(google)
 
 	// Example custom provider (OIDC issuer based):

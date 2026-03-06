@@ -62,6 +62,16 @@ func main() {
 	// auth.AddProvider(custom)
 
 	bettergoth.RegisterRoutes(mux, auth)
+	mux.Handle("/me", auth.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := bettergoth.UserFromContext(r.Context())
+		if !ok {
+			http.Error(w, "missing user", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(user.Subject))
+	})))
 
 	log.Println("Server running on :8080")
 	http.ListenAndServe(":8080", mux)

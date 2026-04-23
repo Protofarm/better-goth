@@ -32,14 +32,42 @@ func (f UserHandlerFunc) HandleUser(ctx context.Context, user *pb.User) error {
 	return f(ctx, user)
 }
 
+type AuthResult struct {
+	Provider     string
+	User         *pb.User
+	SignedToken  string
+	OAuthToken   *oauth2.Token
+	IDToken      string
+	RawIDClaims  map[string]interface{}
+	AccessToken  string
+	RefreshToken string
+	TokenType    string
+	ExpiresAt    time.Time
+}
+
+type AuthResultHandler interface {
+	HandleAuthResult(ctx context.Context, w http.ResponseWriter, r *http.Request, result *AuthResult) error
+}
+
+type AuthResultHandlerFunc func(context.Context, http.ResponseWriter, *http.Request, *AuthResult) error
+
+func (f AuthResultHandlerFunc) HandleAuthResult(ctx context.Context, w http.ResponseWriter, r *http.Request, result *AuthResult) error {
+	return f(ctx, w, r, result)
+}
+
 type Auth struct {
-	Providers   map[string]Provider
-	jwtSecret   []byte
-	userHandler UserHandler
+	Providers         map[string]Provider
+	jwtSecret         []byte
+	userHandler       UserHandler
+	authResultHandler AuthResultHandler
 }
 
 func (a *Auth) SetUserHandler(h UserHandler) {
 	a.userHandler = h
+}
+
+func (a *Auth) SetAuthResultHandler(h AuthResultHandler) {
+	a.authResultHandler = h
 }
 
 type Provider interface {
@@ -82,7 +110,6 @@ func RegisterRoutes(mux *http.ServeMux, auth *Auth) {
 }
 
 func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
-
 	providerName := r.PathValue("provider")
 
 	provider, ok := a.Providers[providerName]
@@ -90,6 +117,7 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
 	state, err := generateState()
 	if err != nil {
 		http.Error(w, "failed to generate state", http.StatusInternalServerError)
@@ -103,8 +131,8 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   false,
 	})
-	authURL := provider.Config().AuthCodeURL(state, oauth2.AccessTypeOffline)
 
+	authURL := provider.Config().AuthCodeURL(state, oauth2.AccessTypeOffline)
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
@@ -187,7 +215,6 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var claims map[string]interface{}
-
 	if err := idToken.Claims(&claims); err != nil {
 		http.Error(w, "failed to parse claims", http.StatusInternalServerError)
 		return
@@ -198,11 +225,13 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing subject claim", http.StatusInternalServerError)
 		return
 	}
+
 	signedToken, err := a.signJWT(subject, token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
 		return
 	}
+
 	u := &pb.User{
 		Picture:       claims["picture"].(string),
 		Iat:           claims["iat"].(float64),
@@ -226,7 +255,27 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	result := &AuthResult{
+		Provider:     providerName,
+		User:         u,
+		SignedToken:  signedToken,
+		OAuthToken:   token,
+		IDToken:      rawIDToken,
+		RawIDClaims:  claims,
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		ExpiresAt:    token.Expiry,
+	}
+
+	if a.authResultHandler != nil {
+		if err := a.authResultHandler.HandleAuthResult(r.Context(), w, r, result); err != nil {
+			http.Error(w, "failed to handle auth result", http.StatusInternalServerError)
+			return
+		}
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write([]byte(signedToken))
-
 }

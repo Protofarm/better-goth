@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard - better-goth example</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 2rem;
+      line-height: 1.45;
+      color: #111;
+    }
+
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    }
+
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 10px;
+      padding: 1rem;
+      background: #fff;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid #eee;
+      text-align: left;
+      padding: 0.5rem;
+      vertical-align: top;
+    }
+
+    th {
+      background: #fafafa;
+    }
+
+    code {
+      background: #f5f5f5;
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+
+    .ok {
+      color: #0b7a2f;
+      font-weight: 600;
+    }
+
+    .warn {
+      color: #8a4b00;
+      font-weight: 600;
+    }
+
+    .button {
+      display: inline-block;
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #111;
+      background: #111;
+      color: #fff;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .button:hover {
+      background: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>Dashboard</h1>
+  <p>You are authenticated. This page is protected by <code>RequireAuth</code>.</p>
+  <form action="/signout" method="post" style="margin: 1rem 0;">
+    <button class="button" type="submit">Sign out</button>
+  </form>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Logged-in user</h2>
+      <ul>
+        <li><strong>Subject:</strong> {{ .User.Subject }}</li>
+        <li><strong>JWT exp:</strong> {{ if .User.Claims.ExpiresAt }}{{ .User.Claims.ExpiresAt.Time.UTC }}{{ else }}n/a{{ end }}</li>
+      </ul>
+
+      {{ if .UserDetails }}
+      <h3>Provider profile snapshot</h3>
+      <p>(from in-memory app store)</p>
+      <ul>
+        <li><strong>Provider:</strong> {{ .UserDetails.Provider }}</li>
+        <li><strong>Name:</strong> {{ .UserDetails.Name }}</li>
+        <li><strong>Email:</strong> {{ .UserDetails.Email }}</li>
+        <li><strong>OAuth token type:</strong> {{ .UserDetails.TokenType }}</li>
+        <li><strong>OAuth expires at:</strong> {{ .UserDetails.ExpiresAt }}</li>
+      </ul>
+      {{ else }}
+      <p><em>No in-memory token record found for this subject yet.</em></p>
+      {{ end }}
+    </section>
+
+    <section class="card">
+      <h2>JWT cookie settings</h2>
+      <ul>
+        <li><strong>Name:</strong> <code>bg_jwt</code></li>
+        <li><strong>HttpOnly:</strong> <span class="ok">true</span></li>
+        <li><strong>Secure:</strong> {{ if .CookieSecure }}<span class="ok">true</span>{{ else }}<span class="warn">false</span>{{ end }}</li>
+        <li><strong>SameSite:</strong> <code>Lax</code></li>
+        <li><strong>Path:</strong> <code>/</code></li>
+      </ul>
+      <p>Note: when <code>Secure=true</code>, browsers only send the cookie over HTTPS.</p>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top: 1rem;">
+    <h2>Exposed routes and ownership</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Path</th>
+          <th>Handled by</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range .Routes }}
+        <tr>
+          <td><code>{{ .Method }}</code></td>
+          <td><code>{{ .Path }}</code></td>
+          <td>{{ .Owner }}</td>
+          <td>{{ .Description }}</td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+  </section>
+
+  <p style="margin-top: 1rem;">
+    <a href="/tokens">View all token records (JSON)</a> ·
+    <a href="/tokens/{{ .User.Subject }}">View your token record (JSON)</a> ·
+    <a href="/">Home</a>
+  </p>
+</body>
+</html>

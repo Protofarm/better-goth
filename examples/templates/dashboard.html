@@ -107,7 +107,7 @@
     <section class="card">
       <h2>JWT cookie settings</h2>
       <ul>
-        <li><strong>Name:</strong> <code>bg_jwt</code></li>
+        <li><strong>Name:</strong> <code>session_id</code></li>
         <li><strong>HttpOnly:</strong> <span class="ok">true</span></li>
         <li><strong>Secure:</strong> {{ if .CookieSecure }}<span class="ok">true</span>{{ else }}<span class="warn">false</span>{{ end }}</li>
         <li><strong>SameSite:</strong> <code>Lax</code></li>
@@ -142,8 +142,8 @@
   </section>
 
   <p style="margin-top: 1rem;">
-    <a href="/tokens">View all token records (JSON)</a> ·
-    <a href="/tokens/{{ .User.Subject }}">View your token record (JSON)</a> ·
+    <a href="/v1/tokens">View all token records (JSON)</a> ·
+    <a href="/v1/tokens/{{ .User.Subject }}">View your token record (JSON)</a> ·
     <a href="/">Home</a>
   </p>
 </body>

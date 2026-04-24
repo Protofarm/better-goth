@@ -105,12 +105,16 @@ func (a *Auth) AddProvider(provider Provider) {
 
 func RegisterRoutes(mux *http.ServeMux, auth *Auth) {
 	println("Registering auth routes")
-	mux.HandleFunc("GET /api/auth/{provider}", auth.authHandler)
+	mux.HandleFunc("GET /login/{provider}", auth.authHandler)
 	mux.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
 }
 
 func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 	providerName := r.PathValue("provider")
+	if providerName == "" {
+		http.Error(w, "provider is required; use /login/{provider}", http.StatusBadRequest)
+		return
+	}
 
 	provider, ok := a.Providers[providerName]
 	if !ok {
@@ -163,6 +167,10 @@ func (a *Auth) signJWT(subject string, expiresAt time.Time) (string, error) {
 
 func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	providerName := r.PathValue("provider")
+	if providerName == "" {
+		http.Error(w, "provider is required; use /callback/{provider}", http.StatusBadRequest)
+		return
+	}
 
 	provider, ok := a.Providers[providerName]
 	if !ok {

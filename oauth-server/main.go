@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -22,26 +23,42 @@ func main() {
 	requireAuth := middleware.RequireAuth(publicKey)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s))
-	mux.HandleFunc("/token", handlers.TokenHandler(s, privateKey))
+	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(publicKey))
 	// OpenID Connect discovery document
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
-  "issuer":                                "http://localhost:8080",
-  "authorization_endpoint":               "http://localhost:8080/authorize",
-  "token_endpoint":                       "http://localhost:8080/token",
-  "userinfo_endpoint":                    "http://localhost:8080/userinfo",
-  "jwks_uri":                             "http://localhost:8080/.well-known/jwks.json",
-  "scopes_supported":                     ["openid","profile","email"],
-  "response_types_supported":             ["code"],
-  "grant_types_supported":                ["authorization_code","refresh_token","client_credentials"],
-  "token_endpoint_auth_methods_supported":["client_secret_basic","client_secret_post"],
-  "code_challenge_methods_supported":     ["S256","plain"],
-  "subject_types_supported":              ["public"],
-  "id_token_signing_alg_values_supported":["RS256"]
-}`))
+
+		cfg := struct {
+			Issuer                         string   `json:"issuer"`
+			AuthorizationEndpoint          string   `json:"authorization_endpoint"`
+			TokenEndpoint                  string   `json:"token_endpoint"`
+			UserinfoEndpoint               string   `json:"userinfo_endpoint"`
+			JWKSURI                        string   `json:"jwks_uri"`
+			ScopesSupported                []string `json:"scopes_supported"`
+			ResponseTypesSupported         []string `json:"response_types_supported"`
+			GrantTypesSupported            []string `json:"grant_types_supported"`
+			TokenEndpointAuthMethods       []string `json:"token_endpoint_auth_methods_supported"`
+			CodeChallengeMethodsSupported  []string `json:"code_challenge_methods_supported"`
+			SubjectTypesSupported          []string `json:"subject_types_supported"`
+			IDTokenSigningAlgValuesSupport []string `json:"id_token_signing_alg_values_supported"`
+		}{
+			Issuer:                         "http://localhost:8080",
+			AuthorizationEndpoint:          "http://localhost:8080/authorize",
+			TokenEndpoint:                  "http://localhost:8080/oauth/token",
+			UserinfoEndpoint:               "http://localhost:8080/userinfo",
+			JWKSURI:                        "http://localhost:8080/.well-known/jwks.json",
+			ScopesSupported:                []string{"openid", "profile", "email"},
+			ResponseTypesSupported:         []string{"code"},
+			GrantTypesSupported:            []string{"authorization_code", "refresh_token", "client_credentials"},
+			TokenEndpointAuthMethods:       []string{"client_secret_basic", "client_secret_post"},
+			CodeChallengeMethodsSupported:  []string{"S256", "plain"},
+			SubjectTypesSupported:          []string{"public"},
+			IDTokenSigningAlgValuesSupport: []string{"RS256"},
+		}
+
+		_ = json.NewEncoder(w).Encode(cfg)
 	})
 
 	log.Println("OAuth 2.0 server listening on :8080")

@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	jwtCookieName = "bg_jwt"
+	jwtCookieName = "session_id"
 )
 
 // jwt over http only secure
@@ -206,7 +206,7 @@ func main() {
 			Routes: []routeInfo{
 				{
 					Method:      "GET",
-					Path:        "/api/auth/{provider}",
+					Path:        "/login/{provider}",
 					Owner:       "Library (better-goth)",
 					Description: "Starts OAuth flow and redirects to provider",
 				},
@@ -229,22 +229,40 @@ func main() {
 					Description: "Protected dashboard showing route ownership and user details",
 				},
 				{
+					Method:      "GET",
+					Path:        "/api/resource",
+					Owner:       "App",
+					Description: "Protected resource endpoint using session cookie auth",
+				},
+				{
 					Method:      "POST",
 					Path:        "/signout",
 					Owner:       "App",
 					Description: "Clears the JWT cookie and redirects to the homepage",
 				},
 				{
+					Method:      "POST",
+					Path:        "/v1/tokens/store",
+					Owner:       "App",
+					Description: "Stores a token record in the in-memory token store",
+				},
+				{
 					Method:      "GET",
-					Path:        "/tokens",
+					Path:        "/v1/tokens",
 					Owner:       "App",
 					Description: "Returns all in-memory token records as JSON",
 				},
 				{
 					Method:      "GET",
-					Path:        "/tokens/{sub}",
+					Path:        "/v1/tokens/{sessionID}",
 					Owner:       "App",
-					Description: "Returns one in-memory token record by subject as JSON",
+					Description: "Returns one in-memory token record by sessionID as JSON",
+				},
+				{
+					Method:      "PUT",
+					Path:        "/v1/tokens/{sessionID}",
+					Owner:       "App",
+					Description: "Updates one in-memory token record by sessionID",
 				},
 			},
 		}
@@ -255,29 +273,91 @@ func main() {
 		}
 	})))
 
+	mux.Handle("GET /api/resource", authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := bettergoth.UserFromContext(r.Context())
+		if !ok {
+			http.Error(w, "missing user from context", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"sub":     user.Subject,
+			"message": "protected resource access granted",
+		})
+	})))
+
 	mux.HandleFunc("POST /signout", func(w http.ResponseWriter, r *http.Request) {
 		clearAuthCookie(w)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
 
 	// JSON routes
-	mux.HandleFunc("GET /tokens", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /v1/tokens", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(store.all())
 	})
 
-	mux.HandleFunc("GET /tokens/{sub}", func(w http.ResponseWriter, r *http.Request) {
-		sub := r.PathValue("sub")
-		if sub == "" {
-			http.Error(w, "missing sub path param", http.StatusBadRequest)
+	mux.HandleFunc("GET /v1/tokens/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("sessionID")
+		if sessionID == "" {
+			http.Error(w, "missing sessionID path param", http.StatusBadRequest)
 			return
 		}
 
-		rec, ok := store.getBySub(sub)
+		rec, ok := store.getBySub(sessionID)
 		if !ok {
 			http.Error(w, "token not found", http.StatusNotFound)
 			return
 		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(rec)
+	})
+
+	mux.HandleFunc("POST /v1/tokens/store", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var rec tokenRecord
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if rec.UserSub == "" {
+			http.Error(w, "missing user_sub", http.StatusBadRequest)
+			return
+		}
+
+		store.save(rec)
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(rec)
+	})
+
+	mux.HandleFunc("PUT /v1/tokens/{sessionID}", func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("sessionID")
+		if sessionID == "" {
+			http.Error(w, "missing sessionID path param", http.StatusBadRequest)
+			return
+		}
+
+		defer r.Body.Close()
+
+		var rec tokenRecord
+		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		if rec.UserSub == "" {
+			rec.UserSub = sessionID
+		}
+		if rec.UserSub != sessionID {
+			http.Error(w, "sessionID path does not match payload user_sub", http.StatusBadRequest)
+			return
+		}
+
+		store.save(rec)
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(rec)

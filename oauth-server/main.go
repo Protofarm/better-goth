@@ -68,7 +68,6 @@ func main() {
 	requireAuth := middleware.RequireAuth(publicKey)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s))
-	mux.HandleFunc("/signup", handlers.SignupHandler(s))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey, issuerURL))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(publicKey))

@@ -8,7 +8,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/Protofarm/better-goth/oauth-server/models"
@@ -45,47 +44,6 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			if err := r.ParseForm(); err != nil {
 				http.Error(w, "bad request", http.StatusBadRequest)
 				return
-			}
-
-			action := strings.TrimSpace(r.FormValue("action"))
-			switch action {
-			case "signup":
-				user, err := s.CreateUser(
-					r.FormValue("signup_username"),
-					r.FormValue("signup_password"),
-					r.FormValue("signup_email"),
-					r.FormValue("signup_name"),
-				)
-				if err != nil {
-					renderAuthPage(w, authPageData{
-						Title:               "Sign in to continue",
-						ErrorMessage:        err.Error(),
-						ClientID:            clientID,
-						RedirectURI:         redirectURI,
-						State:               state,
-						Scope:               scope,
-						CodeChallenge:       codeChallenge,
-						CodeChallengeMethod: codeChallengeMethod,
-						SignupUsername:      r.FormValue("signup_username"),
-						SignupEmail:         r.FormValue("signup_email"),
-						SignupName:          r.FormValue("signup_name"),
-					})
-					return
-				}
-
-				renderAuthPage(w, authPageData{
-					Title:               "Sign in to continue",
-					SuccessMessage:      "Account created for " + user.Username + ". You can now sign in.",
-					ClientID:            clientID,
-					RedirectURI:         redirectURI,
-					State:               state,
-					Scope:               scope,
-					CodeChallenge:       codeChallenge,
-					CodeChallengeMethod: codeChallengeMethod,
-				})
-				return
-			default:
-				// continue with login flow
 			}
 
 			user, err := s.GetUserByCredentials(
@@ -141,49 +99,6 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			CodeChallenge:       codeChallenge,
 			CodeChallengeMethod: codeChallengeMethod,
 		})
-	}
-}
-
-func SignupHandler(s *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			renderAuthPage(w, authPageData{
-				Title:            "Create account",
-				StandaloneSignup: true,
-			})
-		case http.MethodPost:
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "bad request", http.StatusBadRequest)
-				return
-			}
-
-			user, err := s.CreateUser(
-				r.FormValue("signup_username"),
-				r.FormValue("signup_password"),
-				r.FormValue("signup_email"),
-				r.FormValue("signup_name"),
-			)
-			if err != nil {
-				renderAuthPage(w, authPageData{
-					Title:            "Create account",
-					ErrorMessage:     err.Error(),
-					StandaloneSignup: true,
-					SignupUsername:   r.FormValue("signup_username"),
-					SignupEmail:      r.FormValue("signup_email"),
-					SignupName:       r.FormValue("signup_name"),
-				})
-				return
-			}
-
-			renderAuthPage(w, authPageData{
-				Title:            "Create account",
-				SuccessMessage:   "Account created for " + user.Username + ". Return to the app and login with oauthserver.",
-				StandaloneSignup: true,
-			})
-		default:
-			http.Error(w, "method_not_allowed", http.StatusMethodNotAllowed)
-		}
 	}
 }
 

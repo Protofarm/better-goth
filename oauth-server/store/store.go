@@ -2,11 +2,8 @@ package store
 
 import (
 	"errors"
-	"fmt"
-	"net/url"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Protofarm/better-goth/oauth-server/models"
 )
@@ -81,51 +78,6 @@ func (s *Store) seed(cfg Config) {
 		RedirectURIs: redirectURIs,
 		Scopes:       []string{"openid", "profile", "email"},
 	}
-}
-
-func (s *Store) CreateUser(username, password, email, name string) (*models.User, error) {
-	username = strings.TrimSpace(username)
-	password = strings.TrimSpace(password)
-	email = strings.TrimSpace(email)
-	name = strings.TrimSpace(name)
-
-	if username == "" || password == "" {
-		return nil, errors.New("username and password are required")
-	}
-
-	if name == "" {
-		name = username
-	}
-
-	if email == "" {
-		email = username + "@local.test"
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.byName[username]; exists {
-		return nil, errors.New("username already exists")
-	}
-
-	avatar := models.URL{}
-	if parsed, err := models.ParseURL("https://api.dicebear.com/9.x/initials/svg?seed=" + url.QueryEscape(username)); err == nil {
-		avatar = parsed
-	}
-
-	u := &models.User{
-		ID:        fmt.Sprintf("user-%d", time.Now().UnixNano()),
-		Username:  username,
-		Password:  password,
-		Email:     email,
-		Name:      name,
-		AvatarURL: avatar,
-	}
-
-	s.users[u.ID] = u
-	s.byName[u.Username] = u
-
-	return u, nil
 }
 
 func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {

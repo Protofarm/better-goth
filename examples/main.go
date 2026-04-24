@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +26,38 @@ const (
 )
 
 // jwt over http only secure
-var jwtCookieSecure = true
+var jwtCookieSecure = false
+
+func envOrDefault(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func envBoolOrDefault(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return fallback
+	}
+
+	return parsed
+}
+
+func normalizePort(port string) string {
+	p := strings.TrimSpace(port)
+	p = strings.TrimPrefix(p, ":")
+	if p == "" {
+		return "3000"
+	}
+	return p
+}
 
 type tokenRecord struct {
 	Provider     string `json:"provider"`
@@ -86,6 +120,11 @@ type dashboardData struct {
 	CookieSecure bool
 }
 
+type homeData struct {
+	LoginPath string
+	SignupURL string
+}
+
 func loadTemplates() (home *template.Template, dashboard *template.Template, err error) {
 	homePath := filepath.Join("templates", "home.html")
 	dashboardPath := filepath.Join("templates", "dashboard.html")
@@ -110,19 +149,25 @@ func main() {
 		log.Println("No .env loaded, using environment variables as-is")
 	}
 
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	jwtSecret := os.Getenv("JWT_SECRET")
+	appPort := normalizePort(envOrDefault("APP_PORT", "3000"))
+	oauthServerIssuer := envOrDefault("OAUTH_SERVER_ISSUER_URL", "http://localhost:8080")
+	oauthServerClientID := envOrDefault("OAUTH_SERVER_CLIENT_ID", "my-client")
+	oauthServerClientSecret := envOrDefault("OAUTH_SERVER_CLIENT_SECRET", "my-secret")
+	jwtSecret := envOrDefault("JWT_SECRET", "replace-with-at-least-32-bytes-secret")
+	jwtCookieSecure = envBoolOrDefault("JWT_COOKIE_SECURE", false)
+	providerLoginPath := "/login/" + providers.OAuthServerProviderName
+	signupURL := strings.TrimRight(oauthServerIssuer, "/") + "/signup"
 
 	homeTemplate, dashboardTemplate, err := loadTemplates()
 	if err != nil {
 		log.Fatalf("failed to load templates: %v", err)
 	}
 
-	google, err := providers.NewGoogleProvider(
-		clientID,
-		clientSecret,
-		"http://localhost:8080/callback/google",
+	oauthServerProvider, err := providers.NewOAuthServerProvider(
+		oauthServerIssuer,
+		oauthServerClientID,
+		oauthServerClientSecret,
+		fmt.Sprintf("http://localhost:%s/callback/%s", appPort, providers.OAuthServerProviderName),
 		[]string{},
 	)
 	if err != nil {
@@ -175,12 +220,15 @@ func main() {
 		},
 	))
 
-	auth.AddProvider(google)
+	auth.AddProvider(oauthServerProvider)
 	bettergoth.RegisterRoutes(mux, auth)
 
 	// Home page (app-owned)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		if err := homeTemplate.Execute(w, nil); err != nil {
+		if err := homeTemplate.Execute(w, homeData{
+			LoginPath: providerLoginPath,
+			SignupURL: signupURL,
+		}); err != nil {
 			http.Error(w, "failed to render home page", http.StatusInternalServerError)
 			return
 		}
@@ -206,13 +254,13 @@ func main() {
 			Routes: []routeInfo{
 				{
 					Method:      "GET",
-					Path:        "/login/{provider}",
+					Path:        "/login/oauthserver",
 					Owner:       "Library (better-goth)",
-					Description: "Starts OAuth flow and redirects to provider",
+					Description: "Starts OAuth flow against local oauth-server",
 				},
 				{
 					Method:      "GET",
-					Path:        "/callback/{provider}",
+					Path:        "/callback/oauthserver",
 					Owner:       "Library + App hook",
 					Description: "Library validates OAuth callback, builds auth result, invokes app handler",
 				},
@@ -363,8 +411,9 @@ func main() {
 		_ = json.NewEncoder(w).Encode(rec)
 	})
 
-	log.Println("Server running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	listenAddr := ":" + appPort
+	log.Printf("Server running on %s", listenAddr)
+	log.Fatal(http.ListenAndServe(listenAddr, mux))
 }
 
 func clearAuthCookie(w http.ResponseWriter) {

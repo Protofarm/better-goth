@@ -15,9 +15,7 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-const issuer = "http://localhost:8080"
-
-func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey) http.HandlerFunc {
+func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method_not_allowed", http.StatusMethodNotAllowed)
@@ -57,7 +55,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey) http.HandlerFunc {
 			return
 		}
 
-		accessJWT, err := signJWT(tok, privateKey)
+		accessJWT, err := signJWT(tok, privateKey, issuer)
 		if err != nil {
 			http.Error(w, "server_error", http.StatusInternalServerError)
 			return
@@ -125,8 +123,6 @@ func handleClientCredentials(clientID string) (*models.Token, error) {
 	return t, nil
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
 func newToken(userID, clientID, scope string) *models.Token {
 	b := make([]byte, 32)
 	rand.Read(b)
@@ -143,7 +139,7 @@ func newToken(userID, clientID, scope string) *models.Token {
 }
 
 // signJWT creates a signed RS256 JWT using the token metadata as claims.
-func signJWT(tok *models.Token, key *rsa.PrivateKey) (string, error) {
+func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss":       issuer,

@@ -27,9 +27,6 @@ go.work.sum
 # env file
 .env
 
-# private key files
-*.pem
-
 # Editor/IDE
 # .idea/
 # .vscode/

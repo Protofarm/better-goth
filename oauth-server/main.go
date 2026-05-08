@@ -1,20 +1,63 @@
-package oauthserver
+package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/middleware"
 	"github.com/Protofarm/better-goth/oauth-server/store"
+	"github.com/joho/godotenv"
 )
 
-func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, redirectURIs []string) (*http.ServeMux, error) {
+func envOrDefault(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func normalizePort(port string) string {
+	p := strings.TrimSpace(port)
+	p = strings.TrimPrefix(p, ":")
+	if p == "" {
+		return "8080"
+	}
+	return p
+}
+
+func splitCSV(input string) []string {
+	parts := strings.Split(input, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func main() {
+	if err := godotenv.Load(); err != nil {
+		log.Println("No .env loaded, using environment variables as-is")
+	}
+
+	port := normalizePort(envOrDefault("OAUTH_SERVER_PORT", "8080"))
+	issuerURL := strings.TrimRight(envOrDefault("OAUTH_SERVER_ISSUER_URL", "http://localhost:"+port), "/")
+	keyFile := envOrDefault("OAUTH_SERVER_KEY_FILE", "private.pem")
+	clientID := envOrDefault("OAUTH_SERVER_CLIENT_ID", "my-client")
+	clientSecret := envOrDefault("OAUTH_SERVER_CLIENT_SECRET", "my-secret")
+	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", "http://localhost:3000/callback/oauthserver"))
+
 	privateKey, err := keys.LoadOrGenerate(keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("RSA key: %v", err)
+		log.Fatalf("RSA key: %v", err)
 	}
 	publicKey := &privateKey.PublicKey
 	s := store.NewStore(store.Config{
@@ -63,5 +106,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 		_ = json.NewEncoder(w).Encode(cfg)
 	})
 
-	return mux, nil
+	listenAddr := ":" + port
+	log.Printf("OAuth 2.0 server listening on %s", listenAddr)
+	log.Fatal(http.ListenAndServe(listenAddr, mux))
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	bettergoth "github.com/Protofarm/better-goth"
+	oauthserver "github.com/Protofarm/better-goth/oauth-server"
 	"github.com/Protofarm/better-goth/pb"
 	"github.com/Protofarm/better-goth/providers"
 	"github.com/joho/godotenv"
@@ -142,6 +143,18 @@ func loadTemplates() (home *template.Template, dashboard *template.Template, err
 	return home, dashboard, nil
 }
 
+func splitCSV(input string) []string {
+	parts := strings.Split(input, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func main() {
 	mux := http.NewServeMux()
 
@@ -155,6 +168,19 @@ func main() {
 	oauthServerClientSecret := envOrDefault("OAUTH_SERVER_CLIENT_SECRET", "my-secret")
 	jwtSecret := envOrDefault("JWT_SECRET", "replace-with-at-least-32-bytes-secret")
 	jwtCookieSecure = envBoolOrDefault("JWT_COOKIE_SECURE", false)
+
+	oauthPort := normalizePort(envOrDefault("OAUTH_SERVER_PORT", "8080"))
+	keyFile := envOrDefault("OAUTH_SERVER_KEY_FILE", "private.pem")
+	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", "http://localhost:8080/callback/oauthserver"))
+
+	// use default oauth server implementation, can be managed automatically
+	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyFile, oauthServerClientID, oauthServerClientSecret, redirectURIs)
+	go func() {
+		listenAddr := ":" + oauthPort
+		log.Printf("OAuth 2.0 server listening on %s", listenAddr)
+		log.Fatal(http.ListenAndServe(listenAddr, oauthServer))
+	}()
+
 	providerLoginPath := "/login/" + providers.OAuthServerProviderName
 	signupURL := strings.TrimRight(oauthServerIssuer, "/") + "/signup"
 

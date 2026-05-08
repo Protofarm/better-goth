@@ -46,21 +46,34 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 				return
 			}
 
-			user, err := s.GetUserByCredentials(
-				r.FormValue("username"),
-				r.FormValue("password"),
+			var (
+				user *models.User
+				err  error
+				msg  string
 			)
+
+			if signupUsername := r.FormValue("signup_username"); signupUsername != "" {
+				user = &models.User{Username: signupUsername, Email: r.FormValue("signup_email"), Name: r.FormValue("signup_name"), Password: r.FormValue("signup_password")}
+				err = s.CreateUser(user)
+				msg = "Username or email already taken."
+
+			} else {
+				user, err = s.GetUserByCredentials(
+					r.FormValue("username"),
+					r.FormValue("password"),
+				)
+				msg = "Invalid username or password."
+			}
 			if err != nil {
 				renderAuthPage(w, authPageData{
 					Title:               "Sign in to continue",
-					ErrorMessage:        "Invalid username or password.",
+					ErrorMessage:        msg,
 					ClientID:            clientID,
 					RedirectURI:         redirectURI,
 					State:               state,
 					Scope:               scope,
 					CodeChallenge:       codeChallenge,
 					CodeChallengeMethod: codeChallengeMethod,
-					Username:            r.FormValue("username"),
 				})
 				return
 			}

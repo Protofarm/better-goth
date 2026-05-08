@@ -6,12 +6,14 @@ import (
 	"sync"
 
 	"github.com/Protofarm/better-goth/oauth-server/models"
+	"github.com/google/uuid"
 )
 
 type Store struct {
 	mu      sync.RWMutex
 	users   map[string]*models.User
 	byName  map[string]*models.User
+	byEmail map[string]*models.User
 	clients map[string]*models.Client
 	codes   map[string]*models.AuthCode
 	tokens  map[string]*models.Token
@@ -28,6 +30,7 @@ func NewStore(cfg Config) *Store {
 	s := &Store{
 		users:   make(map[string]*models.User),
 		byName:  make(map[string]*models.User),
+		byEmail: make(map[string]*models.User),
 		clients: make(map[string]*models.Client),
 		codes:   make(map[string]*models.AuthCode),
 		tokens:  make(map[string]*models.Token),
@@ -71,6 +74,7 @@ func (s *Store) seed(cfg Config) {
 	}
 	s.users[u.ID] = u
 	s.byName[u.Username] = u
+	s.byEmail[u.Email] = u
 
 	s.clients[clientID] = &models.Client{
 		ClientID:     clientID,
@@ -163,4 +167,29 @@ func (s *Store) RevokeAccessToken(token string) {
 		delete(s.refresh, t.RefreshToken)
 	}
 	delete(s.tokens, token)
+}
+
+func (s *Store) CreateUser(user *models.User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	user.ID = uuid.New().String()
+
+	if s.byName[user.Username] != nil {
+		return errors.New("username already exists")
+	}
+
+	if s.byEmail[user.Email] != nil {
+		return errors.New("email already registered")
+	}
+
+	s.users[user.ID] = user
+	s.byName[user.Username] = user
+	s.byEmail[user.Email] = user
+
+	if s.users[user.ID] != nil {
+		return nil
+	}
+
+	return errors.New("unable to create user")
 }

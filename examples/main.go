@@ -122,8 +122,9 @@ type dashboardData struct {
 }
 
 type homeData struct {
-	LoginPath string
-	SignupURL string
+	OAuthServerLoginPath string
+	GoogleLoginPath      string
+	SignupURL            string
 }
 
 func loadTemplates() (home *template.Template, dashboard *template.Template, err error) {
@@ -166,12 +167,15 @@ func main() {
 	oauthServerIssuer := envOrDefault("OAUTH_SERVER_ISSUER_URL", "http://localhost:8080")
 	oauthServerClientID := envOrDefault("OAUTH_SERVER_CLIENT_ID", "my-client")
 	oauthServerClientSecret := envOrDefault("OAUTH_SERVER_CLIENT_SECRET", "my-secret")
+	googleClientID := envOrDefault("GOOGLE_CLIENT_ID", "")
+	googleClientSecret := envOrDefault("GOOGLE_CLIENT_SECRET", "")
 	jwtSecret := envOrDefault("JWT_SECRET", "replace-with-at-least-32-bytes-secret")
 	jwtCookieSecure = envBoolOrDefault("JWT_COOKIE_SECURE", false)
 
 	oauthPort := normalizePort(envOrDefault("OAUTH_SERVER_PORT", "8080"))
 	keyFile := envOrDefault("OAUTH_SERVER_KEY_FILE", "private.pem")
-	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", "http://localhost:8080/callback/oauthserver"))
+	defaultRedirectURI := fmt.Sprintf("http://localhost:%s/callback/oauthserver", appPort)
+	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", defaultRedirectURI))
 
 	// use default oauth server implementation, can be managed automatically
 	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyFile, oauthServerClientID, oauthServerClientSecret, redirectURIs)
@@ -182,6 +186,7 @@ func main() {
 	}()
 
 	providerLoginPath := "/login/" + providers.OAuthServerProviderName
+	googleLoginPath := "/login/google"
 	signupURL := strings.TrimRight(oauthServerIssuer, "/") + "/signup"
 
 	homeTemplate, dashboardTemplate, err := loadTemplates()
@@ -247,13 +252,30 @@ func main() {
 	))
 
 	auth.AddProvider(oauthServerProvider)
+
+	// Add Google provider if credentials are provided
+	if googleClientID != "" && googleClientSecret != "" {
+		googleProvider, err := providers.NewGoogleProvider(
+			googleClientID,
+			googleClientSecret,
+			fmt.Sprintf("http://localhost:%s/callback/google", appPort),
+			[]string{},
+		)
+		if err != nil {
+			log.Printf("Warning: failed to create Google provider: %v", err)
+		} else {
+			auth.AddProvider(googleProvider)
+			log.Printf("Google provider registered")
+		}
+	}
 	bettergoth.RegisterRoutes(mux, auth)
 
 	// Home page (app-owned)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		if err := homeTemplate.Execute(w, homeData{
-			LoginPath: providerLoginPath,
-			SignupURL: signupURL,
+			OAuthServerLoginPath: providerLoginPath,
+			GoogleLoginPath:      googleLoginPath,
+			SignupURL:            signupURL,
 		}); err != nil {
 			http.Error(w, "failed to render home page", http.StatusInternalServerError)
 			return

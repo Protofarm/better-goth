@@ -48,16 +48,19 @@
   <div class="card">
     <h1>better-goth example app</h1>
     <p>
-      This page is app-owned. Click login to start OAuth through the local oauth-server provider route
-      <code>{{ .LoginPath }}</code>.
+      This page is app-owned. Click login to start OAuth through a provider.
+    </p>
+
+    <h2>Login Options</h2>
+    <p>
+      <a class="button" href="{{ .OAuthServerLoginPath }}">Login with oauth-server</a>
+      {{if .GoogleLoginPath}}
+      <a class="button" href="{{ .GoogleLoginPath }}">Login with Google</a>
+      {{end}}
     </p>
 
     <p>
-      <a class="button" href="{{ .LoginPath }}">Login with oauth-server</a>
-    </p>
-
-    <p>
-      Need an account? Create one at
+      Need an account for oauth-server? Create one at
       <a href="{{ .SignupURL }}">{{ .SignupURL }}</a>
       before logging in.
     </p>

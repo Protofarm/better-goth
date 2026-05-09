@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -63,16 +64,24 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 		tok.AccessToken = accessJWT
 		s.SaveToken(tok)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Pragma", "no-cache")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		resp := map[string]interface{}{
 			"access_token":  tok.AccessToken,
 			"token_type":    "Bearer",
 			"expires_in":    tok.ExpiresIn,
 			"refresh_token": tok.RefreshToken,
 			"scope":         tok.Scope,
-		})
+		}
+
+		if strings.Contains(tok.Scope, "openid") || grantType == "authorization_code" {
+			if idToken, err := signIDToken(tok, s, privateKey, issuer); err == nil {
+				resp["id_token"] = idToken
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		json.NewEncoder(w).Encode(resp)
 	}
 }
 
@@ -144,7 +153,7 @@ func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, err
 	claims := jwt.MapClaims{
 		"iss":       issuer,
 		"sub":       tok.UserID,
-		"aud":       jwt.ClaimStrings{tok.ClientID},
+		"aud":       tok.ClientID,
 		"iat":       now.Unix(),
 		"exp":       now.Add(time.Duration(tok.ExpiresIn) * time.Second).Unix(),
 		"scope":     tok.Scope,
@@ -168,4 +177,44 @@ func tokenError(w http.ResponseWriter, errCode, desc string) {
 		"error":             errCode,
 		"error_description": desc,
 	})
+}
+
+// signIDToken creates a signed RS256 JWT using the token metadata as OIDC claims,
+func signIDToken(tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer string) (string, error) {
+	now := time.Now()
+	
+	user, err := s.GetUserByID(tok.UserID)
+	if err != nil {
+		return "", fmt.Errorf("user not found for id_token claims")
+	}
+	
+	// Extract given_name from name
+	givenName := ""
+	if user.Name != "" {
+		parts := strings.Split(user.Name, " ")
+		givenName = parts[0]
+	}
+	
+	claims := jwt.MapClaims{
+		"iss":              issuer,
+		"sub":              tok.UserID,
+		"aud":              tok.ClientID,
+		"iat":              now.Unix(),
+		"exp":              now.Add(time.Duration(tok.ExpiresIn) * time.Second).Unix(),
+		"token_use":        "id",
+		"auth_time":        now.Unix(),
+		"azp":              tok.ClientID,
+		"picture":          user.AvatarURL.String(),
+		"email":            user.Email,
+		"email_verified":   false,
+		"name":             user.Name,
+		"given_name":       givenName,
+		"at_hash":          "",
+	}
+	
+	if user.Email != "" {
+		claims["email_verified"] = true
+	}
+	
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
 }

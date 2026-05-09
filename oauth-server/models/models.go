@@ -57,6 +57,7 @@ type AuthCode struct {
 	UserID              string
 	RedirectURI         string
 	Scope               string
+	Nonce               string
 	ExpiresAt           time.Time
 	CodeChallenge       string // PKCE
 	CodeChallengeMethod string // "S256" or "plain"
@@ -68,6 +69,7 @@ type Token struct {
 	TokenType    string
 	ExpiresIn    int
 	Scope        string
+	Nonce        string
 	UserID       string
 	ClientID     string
 	ExpiresAt    time.Time

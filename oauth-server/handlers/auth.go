@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"html/template"
 	"net/http"
@@ -21,22 +19,34 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 		redirectURI := q.Get("redirect_uri")
 		state := q.Get("state")
 		scope := q.Get("scope")
+		responseType := q.Get("response_type")
+		nonce := q.Get("nonce")
 		codeChallenge := q.Get("code_challenge")
 		codeChallengeMethod := q.Get("code_challenge_method")
 
+		// RFC 6749 Section 3.1.1: response_type is required
+		if responseType != "code" {
+			// Cannot redirect without valid redirect_uri, so return direct error
+			http.Error(w, `{"error":"unsupported_response_type","error_description":"response_type must be 'code'"}`, http.StatusBadRequest)
+			return
+		}
+
+		// RFC 6749 Section 3.1.1: client_id is required
 		client, err := s.GetClient(clientID)
 		if err != nil {
-			http.Error(w, "invalid_client", http.StatusBadRequest)
+			http.Error(w, `{"error":"invalid_client","error_description":"client_id is invalid or missing"}`, http.StatusBadRequest)
 			return
 		}
 
+		// RFC 6749 Section 3.1.2.1: redirect_uri must be registered
 		if !isValidRedirect(client.RedirectURIs, redirectURI) {
-			http.Error(w, "invalid_redirect_uri", http.StatusBadRequest)
+			http.Error(w, `{"error":"invalid_redirect_uri","error_description":"redirect_uri is not registered"}`, http.StatusBadRequest)
 			return
 		}
 
+		// RFC 6749 Section 3.1.1: state is required (best practice, enforced here)
 		if state == "" {
-			redirectWithError(w, r, redirectURI, "invalid_request", "state is required", "")
+			redirectWithError(w, r, redirectURI, "invalid_request", "state parameter is required", "")
 			return
 		}
 
@@ -72,6 +82,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 					RedirectURI:         redirectURI,
 					State:               state,
 					Scope:               scope,
+					Nonce:               nonce,
 					CodeChallenge:       codeChallenge,
 					CodeChallengeMethod: codeChallengeMethod,
 				})
@@ -89,6 +100,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 				UserID:              user.ID,
 				RedirectURI:         redirectURI,
 				Scope:               scope,
+				Nonce:               nonce,
 				ExpiresAt:           time.Now().Add(5 * time.Minute),
 				CodeChallenge:       codeChallenge,
 				CodeChallengeMethod: codeChallengeMethod,
@@ -109,6 +121,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			RedirectURI:         redirectURI,
 			State:               state,
 			Scope:               scope,
+			Nonce:               nonce,
 			CodeChallenge:       codeChallenge,
 			CodeChallengeMethod: codeChallengeMethod,
 		})
@@ -136,18 +149,6 @@ func redirectWithError(w http.ResponseWriter, r *http.Request, redirectURI, errC
 	http.Redirect(w, r, dest.String(), http.StatusFound)
 }
 
-func verifyPKCE(method, challenge, verifier string) bool {
-	switch method {
-	case "S256":
-		h := sha256.Sum256([]byte(verifier))
-		computed := base64.RawURLEncoding.EncodeToString(h[:])
-		return computed == challenge
-	case "plain", "":
-		return verifier == challenge
-	}
-	return false
-}
-
 type authPageData struct {
 	Title               string
 	ErrorMessage        string
@@ -156,6 +157,7 @@ type authPageData struct {
 	RedirectURI         string
 	State               string
 	Scope               string
+	Nonce               string
 	CodeChallenge       string
 	CodeChallengeMethod string
 	Username            string
@@ -219,6 +221,7 @@ const authPageHTML = `<!DOCTYPE html>
 				<input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
 				<input type="hidden" name="state" value="{{.State}}">
 				<input type="hidden" name="scope" value="{{.Scope}}">
+				<input type="hidden" name="nonce" value="{{.Nonce}}">
 				<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 				<input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
 				<label>Username</label>
@@ -236,6 +239,7 @@ const authPageHTML = `<!DOCTYPE html>
 				<input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
 				<input type="hidden" name="state" value="{{.State}}">
 				<input type="hidden" name="scope" value="{{.Scope}}">
+				<input type="hidden" name="nonce" value="{{.Nonce}}">
 				<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 				<input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
 				<label>Username</label>

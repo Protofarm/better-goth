@@ -270,6 +270,31 @@ func main() {
 	}
 	bettergoth.RegisterRoutes(mux, auth)
 
+	// RFC 9650: RDAP Help endpoint - advertise authentication support
+	mux.HandleFunc("GET /help", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		help := map[string]interface{}{
+			"rdapConformance": []string{"rdapLevel0", "farv1"},
+			"notices": []map[string]interface{}{
+				{
+					"title": "Authentication Required",
+					"description": []string{
+						"This RDAP server supports authentication via OpenID Connect.",
+						"Use /login/oauthserver to initiate authentication.",
+					},
+				},
+			},
+			"supportedOPs": []map[string]interface{}{
+				{
+					"issuer":    strings.TrimRight(oauthServerIssuer, "/"),
+					"client_id": oauthServerClientID,
+					"scopes": []string{"openid", "profile", "email"},
+				},
+			},
+		}
+		json.NewEncoder(w).Encode(help)
+	})
+
 	// Home page (app-owned)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		if err := homeTemplate.Execute(w, homeData{
@@ -302,33 +327,45 @@ func main() {
 			Routes: []routeInfo{
 				{
 					Method:      "GET",
-					Path:        "/login/oauthserver",
-					Owner:       "Library (better-goth)",
-					Description: "Starts OAuth flow against local oauth-server",
-				},
-				{
-					Method:      "GET",
-					Path:        "/callback/oauthserver",
-					Owner:       "Library + App hook",
-					Description: "Library validates OAuth callback, builds auth result, invokes app handler",
+					Path:        "/help",
+					Owner:       "App",
+					Description: "RFC 9650 RDAP help endpoint - advertises authentication capabilities with 'farv1' support",
 				},
 				{
 					Method:      "GET",
 					Path:        "/",
 					Owner:       "App",
-					Description: "Homepage with login action",
+					Description: "Homepage with login options",
+				},
+				{
+					Method:      "GET",
+					Path:        "/login/oauthserver",
+					Owner:       "Library (better-goth)",
+					Description: "Starts OAuth 2.0 authorization code flow against local oauth-server",
+				},
+				{
+					Method:      "GET",
+					Path:        "/callback/oauthserver",
+					Owner:       "Library + App hook",
+					Description: "OAuth callback - library validates, app handles result via AuthResultHandler",
 				},
 				{
 					Method:      "GET",
 					Path:        "/dashboard",
 					Owner:       "App",
-					Description: "Protected dashboard showing route ownership and user details",
+					Description: "Protected dashboard showing route ownership and user details (session cookie auth)",
 				},
 				{
 					Method:      "GET",
 					Path:        "/api/resource",
 					Owner:       "App",
-					Description: "Protected resource endpoint using session cookie auth",
+					Description: "Protected resource endpoint using session cookie authentication (RFC 6750 via cookie)",
+				},
+				{
+					Method:      "GET",
+					Path:        "/api/resource/bearer",
+					Owner:       "App",
+					Description: "Protected resource endpoint using Bearer token (RFC 6750) from Authorization header",
 				},
 				{
 					Method:      "POST",
@@ -377,11 +414,34 @@ func main() {
 		}
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"sub":     user.Subject,
-			"message": "protected resource access granted",
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"sub":              user.Subject,
+			"message":          "protected resource access granted",
+			"authentication":   "session cookie",
 		})
 	})))
+
+	// RFC 6750: Bearer token endpoint - protected resource with Bearer token auth
+	mux.HandleFunc("GET /api/resource/bearer", func(w http.ResponseWriter, r *http.Request) {
+		user, err := auth.VerifyRequest(r)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token" error_description="Authorization header must contain a valid Bearer token"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error":             "invalid_token",
+				"error_description": "Authorization header must contain a valid Bearer token",
+			})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"sub":               user.Subject,
+			"message":           "protected resource access granted",
+			"authentication":    "Bearer token",
+		})
+	})
 
 	mux.HandleFunc("POST /signout", func(w http.ResponseWriter, r *http.Request) {
 		clearAuthCookie(w)

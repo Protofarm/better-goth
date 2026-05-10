@@ -89,9 +89,13 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		json.NewEncoder(w).Encode(resp)
 	}
 }
@@ -119,15 +123,20 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 	if authCode.RedirectURI != redirectURI {
 		return nil, fmt.Errorf("redirect_uri mismatch")
 	}
+	if authCode.CodeChallenge == "" {
+		return nil, fmt.Errorf("PKCE (code_challenge) is required per OAuth 2.1")
+	}
 
-	//PKCE verification (RFC 7636)
-	if authCode.CodeChallenge != "" {
-		if verifier == "" {
-			return nil, fmt.Errorf("code_verifier is required")
-		}
-		if !verifyPKCE(authCode.CodeChallengeMethod, authCode.CodeChallenge, verifier) {
-			return nil, fmt.Errorf("code_verifier does not match code_challenge")
-		}
+	if verifier == "" {
+		return nil, fmt.Errorf("code_verifier is required")
+	}
+
+	if authCode.CodeChallengeMethod != "S256" {
+		return nil, fmt.Errorf("only S256 code_challenge_method is allowed")
+	}
+
+	if !verifyPKCE(authCode.CodeChallenge, verifier) {
+		return nil, fmt.Errorf("code_verifier does not match code_challenge")
 	}
 
 	tok := newToken(authCode.UserID, clientID, authCode.Scope)
@@ -149,6 +158,8 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) 
 	if time.Now().After(old.ExpiresAt) {
 		return nil, fmt.Errorf("refresh token expired")
 	}
+	//revoke old refresh token
+	s.RevokeRefreshToken(refreshToken)
 
 	// RFC 6749 Section 6: Refresh token rotation (implicit revocation of old token)
 	// Generate new token pair
@@ -211,16 +222,10 @@ func tokenError(w http.ResponseWriter, errCode, desc string) {
 }
 
 // verifyPKCE verifies code_verifier against code_challenge per RFC 7636
-func verifyPKCE(method, challenge, verifier string) bool {
-	switch method {
-	case "S256":
-		h := sha256.Sum256([]byte(verifier))
-		computed := base64.RawURLEncoding.EncodeToString(h[:])
-		return computed == challenge
-	case "plain", "":
-		return verifier == challenge
-	}
-	return false
+func verifyPKCE(challenge, verifier string) bool {
+	h := sha256.Sum256([]byte(verifier))
+	computed := base64.RawURLEncoding.EncodeToString(h[:])
+	return computed == challenge
 }
 
 // signIDToken creates a signed RS256 JWT using the token metadata as OIDC claims,

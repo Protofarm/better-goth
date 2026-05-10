@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Protofarm/better-goth/pb"
@@ -128,16 +132,121 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	codeVerifier, err := generateCodeVerifier()
+	if err != nil {
+		http.Error(w, "failed to generate code_verifier", http.StatusInternalServerError)
+		return
+	}
+	codeChallenge := generateCodeChallenge(codeVerifier)
+
+	nonce, err := generateState()
+	if err != nil {
+		http.Error(w, "failed to generate nonce", http.StatusInternalServerError)
+		return
+	}
+
+	// Store verifier and nonce in cookies
 	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
-		Value:    state,
+		Name:     "oauth_code_verifier",
+		Value:    codeVerifier,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   600,
 	})
 
-	authURL := provider.Config().AuthCodeURL(state, oauth2.AccessTypeOffline)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_nonce",
+		Value:    nonce,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   600,
+	})
+
+	// REPLACE authURL generation:
+	authURL := provider.Config().AuthCodeURL(state,
+		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
+		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+		oauth2.SetAuthURLParam("nonce", nonce),
+		oauth2.AccessTypeOffline,
+	)
 	http.Redirect(w, r, authURL, http.StatusFound)
+}
+
+// generateCodeVerifier generates a PKCE code_verifier per RFC 7636 & OAuth 2.1
+func generateCodeVerifier() (string, error) {
+	b := make([]byte, 96)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// generateCodeChallenge creates S256 code_challenge from verifier
+func generateCodeChallenge(verifier string) string {
+	h := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// exchangeWithPKCE performs token exchange with code_verifier
+func exchangeWithPKCE(ctx context.Context, cfg *oauth2.Config, code, codeVerifier string) (*oauth2.Token, error) {
+	values := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {cfg.RedirectURL},
+		"client_id":     {cfg.ClientID},
+		"client_secret": {cfg.ClientSecret},
+		"code_verifier": {codeVerifier},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.Endpoint.TokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "golang/oauth2")
+
+	resp, err := (&http.Client{}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int    `json:"expires_in"`
+		RefreshToken string `json:"refresh_token"`
+		IDToken      string `json:"id_token"`
+		Error        string `json:"error"`
+		ErrorDesc    string `json:"error_description"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return nil, err
+	}
+
+	if tokenResp.Error != "" {
+		return nil, errors.New(tokenResp.Error + ": " + tokenResp.ErrorDesc)
+	}
+
+	tok := &oauth2.Token{
+		AccessToken:  tokenResp.AccessToken,
+		TokenType:    tokenResp.TokenType,
+		RefreshToken: tokenResp.RefreshToken,
+		Expiry:       time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second),
+	}
+
+	if tokenResp.IDToken != "" {
+		tok = tok.WithExtra(map[string]interface{}{"id_token": tokenResp.IDToken})
+	}
+
+	return tok, nil
 }
 
 func generateState() (string, error) {
@@ -240,6 +349,20 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if nonceCookie, err := r.Cookie("oauth_nonce"); err == nil {
+		claimNonce, ok := claims["nonce"].(string)
+		if !ok || claimNonce != nonceCookie.Value {
+			http.Error(w, "nonce mismatch - possible replay attack", http.StatusBadRequest)
+			return
+		}
+		// Clear nonce cookie after validation
+		http.SetCookie(w, &http.Cookie{
+			Name:   "oauth_nonce",
+			Value:  "",
+			Path:   "/",
+			MaxAge: -1,
+		})
+	}
 	u := &pb.User{
 		Picture:       claims["picture"].(string),
 		Iat:           claims["iat"].(float64),

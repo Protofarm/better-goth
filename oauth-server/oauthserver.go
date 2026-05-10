@@ -55,7 +55,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 			ResponseTypesSupported:         []string{"code"},
 			GrantTypesSupported:            []string{"authorization_code", "refresh_token", "client_credentials"},
 			TokenEndpointAuthMethods:       []string{"client_secret_basic", "client_secret_post"},
-			CodeChallengeMethodsSupported:  []string{"S256", "plain"},
+			CodeChallengeMethodsSupported:  []string{"S256"},
 			SubjectTypesSupported:          []string{"public"},
 			IDTokenSigningAlgValuesSupport: []string{"RS256"},
 		}

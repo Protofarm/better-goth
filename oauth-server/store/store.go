@@ -193,3 +193,9 @@ func (s *Store) CreateUser(user *models.User) error {
 
 	return errors.New("unable to create user")
 }
+
+func (s *Store) RevokeRefreshToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.refresh, token)
+}

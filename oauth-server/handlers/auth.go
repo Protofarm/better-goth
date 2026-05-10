@@ -49,6 +49,17 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			redirectWithError(w, r, redirectURI, "invalid_request", "state parameter is required", "")
 			return
 		}
+		if codeChallenge == "" {
+			redirectWithError(w, r, redirectURI, "invalid_request",
+				"code_challenge parameter is required (PKCE is mandatory per OAuth 2.1)", state)
+			return
+		}
+
+		if codeChallengeMethod != "S256" {
+			redirectWithError(w, r, redirectURI, "invalid_request",
+				"only S256 code_challenge_method is allowed", state)
+			return
+		}
 
 		if r.Method == http.MethodPost {
 			if err := r.ParseForm(); err != nil {

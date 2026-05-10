@@ -12,6 +12,8 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
+// AuthorizeHandler handles the OAuth 2.0 authorization request.
+// It supports the authorization code flow with PKCE, as required by OAuth 2.1.
 func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -65,68 +67,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 		}
 
 		if r.Method == http.MethodPost {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "bad request", http.StatusBadRequest)
-				return
-			}
-
-			var (
-				user *models.User
-				err  error
-				msg  string
-			)
-
-			if signupUsername := r.FormValue("signup_username"); signupUsername != "" {
-				user = &models.User{Username: signupUsername, Email: r.FormValue("signup_email"), Name: r.FormValue("signup_name"), Password: r.FormValue("signup_password")}
-				err = s.CreateUser(r.Context(), user)
-				msg = "Username or email already taken."
-
-			} else {
-				user, err = s.GetUserByCredentials(
-					r.Context(),
-					r.FormValue("username"),
-					r.FormValue("password"),
-				)
-				msg = "Invalid username or password."
-			}
-			if err != nil {
-				renderAuthPage(w, authPageData{
-					Title:               "Sign in to continue",
-					ErrorMessage:        msg,
-					ClientID:            clientID,
-					RedirectURI:         redirectURI,
-					State:               state,
-					Scope:               scope,
-					Nonce:               nonce,
-					CodeChallenge:       codeChallenge,
-					CodeChallengeMethod: codeChallengeMethod,
-				})
-				return
-			}
-
-			// Generate single-use auth code
-			b := make([]byte, 16)
-			rand.Read(b)
-			code := hex.EncodeToString(b)
-
-			s.SaveCode(r.Context(), &models.AuthCode{
-				Code:                code,
-				ClientID:            clientID,
-				UserID:              user.ID,
-				RedirectURI:         redirectURI,
-				Scope:               scope,
-				Nonce:               nonce,
-				ExpiresAt:           time.Now().Add(5 * time.Minute),
-				CodeChallenge:       codeChallenge,
-				CodeChallengeMethod: codeChallengeMethod,
-			})
-
-			dest, _ := url.Parse(redirectURI)
-			params := url.Values{}
-			params.Set("code", code)
-			params.Set("state", state)
-			dest.RawQuery = params.Encode()
-			http.Redirect(w, r, dest.String(), http.StatusFound)
+			handleAuthPost(w, r, s, clientID, redirectURI, state, scope, nonce, codeChallenge, codeChallengeMethod)
 			return
 		}
 
@@ -141,6 +82,85 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			CodeChallengeMethod: codeChallengeMethod,
 		})
 	}
+}
+
+func handleAuthPost(w http.ResponseWriter, r *http.Request, s *store.Store, clientID, redirectURI, state, scope, nonce, codeChallenge, codeChallengeMethod string) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	user, err, msg := authenticateOrSignup(r, s)
+	if err != nil {
+		renderAuthPage(w, authPageData{
+			Title:               "Sign in to continue",
+			ErrorMessage:        msg,
+			ClientID:            clientID,
+			RedirectURI:         redirectURI,
+			State:               state,
+			Scope:               scope,
+			Nonce:               nonce,
+			CodeChallenge:       codeChallenge,
+			CodeChallengeMethod: codeChallengeMethod,
+		})
+		return
+	}
+
+	code := generateAuthCode(r, s, user, clientID, redirectURI, scope, nonce, codeChallenge, codeChallengeMethod)
+
+	dest, _ := url.Parse(redirectURI)
+	params := url.Values{}
+	params.Set("code", code)
+	params.Set("state", state)
+	dest.RawQuery = params.Encode()
+	http.Redirect(w, r, dest.String(), http.StatusFound)
+}
+
+func authenticateOrSignup(r *http.Request, s *store.Store) (*models.User, error, string) {
+	if signupUsername := r.FormValue("signup_username"); signupUsername != "" {
+		user := &models.User{
+			Username: signupUsername,
+			Email:    r.FormValue("signup_email"),
+			Name:     r.FormValue("signup_name"),
+			Password: r.FormValue("signup_password"),
+		}
+		err := s.CreateUser(r.Context(), user)
+		if err != nil {
+			return nil, err, "Username or email already taken."
+		}
+		return user, nil, ""
+	}
+
+	user, err := s.GetUserByCredentials(
+		r.Context(),
+		r.FormValue("username"),
+		r.FormValue("password"),
+	)
+	if err != nil {
+		return nil, err, "Invalid username or password."
+	}
+	return user, nil, ""
+}
+
+func generateAuthCode(r *http.Request, s *store.Store, user *models.User, clientID, redirectURI, scope, nonce, codeChallenge, codeChallengeMethod string) string {
+	// Generate single-use auth code
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	code := hex.EncodeToString(b)
+
+	s.SaveCode(r.Context(), &models.AuthCode{
+		Code:                code,
+		ClientID:            clientID,
+		UserID:              user.ID,
+		RedirectURI:         redirectURI,
+		Scope:               scope,
+		Nonce:               nonce,
+		ExpiresAt:           time.Now().Add(5 * time.Minute),
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+	})
+
+	return code
 }
 
 func isValidRedirect(allowed []string, uri string) bool {

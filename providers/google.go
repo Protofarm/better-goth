@@ -1,9 +1,11 @@
 package providers
 
+// GoogleProvider is an OIDC provider for Google.
 type GoogleProvider struct {
 	*Provider
 }
 
+// NewGoogleProvider creates a new GoogleProvider.
 func NewGoogleProvider(clientID, clientSecret, redirectURL string, scopes []string) (*GoogleProvider, error) {
 	provider, err := NewProvider(
 		"google",

@@ -36,7 +36,7 @@ func (a *Auth) VerifyToken(tokenString string) (*VerifiedUser, error) {
 
 	tokenString = strings.TrimSpace(tokenString)
 	if tokenString == "" {
-		return nil, ErrInvalidToken
+		return nil, fmt.Errorf("%w: token is empty", ErrInvalidToken)
 	}
 
 	claims := &jwt.RegisteredClaims{}
@@ -48,7 +48,7 @@ func (a *Auth) VerifyToken(tokenString string) (*VerifiedUser, error) {
 		return a.jwtSecret, nil
 	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 
 	if token == nil || !token.Valid {

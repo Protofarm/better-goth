@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// URL is a wrapper around url.URL that supports JSON marshaling.
 type URL struct {
 	url.URL
 }
@@ -27,6 +28,7 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// ParseURL parses a raw URL string into a URL struct.
 func ParseURL(raw string) (URL, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -35,6 +37,7 @@ func ParseURL(raw string) (URL, error) {
 	return URL{*u}, nil
 }
 
+// User represents a user in the system.
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
@@ -44,6 +47,7 @@ type User struct {
 	AvatarURL URL    `json:"avatar_url"`
 }
 
+// Client represents an OAuth 2.0 client.
 type Client struct {
 	ClientID     string
 	ClientSecret string
@@ -51,6 +55,7 @@ type Client struct {
 	Scopes       []string
 }
 
+// AuthCode represents a temporary authorization code.
 type AuthCode struct {
 	Code                string
 	ClientID            string
@@ -63,6 +68,7 @@ type AuthCode struct {
 	CodeChallengeMethod string // "S256" or "plain"
 }
 
+// Token represents an OAuth 2.0 access and refresh token pair.
 type Token struct {
 	AccessToken  string
 	RefreshToken string

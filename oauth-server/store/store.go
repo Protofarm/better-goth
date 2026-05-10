@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// Store provides in-memory storage for users, clients, codes, and tokens.
 type Store struct {
 	mu      sync.RWMutex
 	users   map[string]*models.User
@@ -21,12 +22,14 @@ type Store struct {
 	refresh map[string]*models.Token
 }
 
+// Config holds the configuration for the Store.
 type Config struct {
 	DefaultClientID     string
 	DefaultClientSecret string
 	DefaultRedirectURIs []string
 }
 
+// NewStore creates a new Store with the provided configuration and seeds it with default data.
 func NewStore(cfg Config) *Store {
 	s := &Store{
 		users:   make(map[string]*models.User),
@@ -85,6 +88,7 @@ func (s *Store) seed(cfg Config) {
 	}
 }
 
+// GetUserByCredentials retrieves a user by their username and password.
 func (s *Store) GetUserByCredentials(ctx context.Context, username, password string) (*models.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -95,6 +99,7 @@ func (s *Store) GetUserByCredentials(ctx context.Context, username, password str
 	return u, nil
 }
 
+// GetUserByID retrieves a user by their unique ID.
 func (s *Store) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -105,6 +110,7 @@ func (s *Store) GetUserByID(ctx context.Context, id string) (*models.User, error
 	return u, nil
 }
 
+// GetClient retrieves an OAuth 2.0 client by its client ID.
 func (s *Store) GetClient(ctx context.Context, id string) (*models.Client, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -115,12 +121,14 @@ func (s *Store) GetClient(ctx context.Context, id string) (*models.Client, error
 	return c, nil
 }
 
+// SaveCode stores an authorization code.
 func (s *Store) SaveCode(ctx context.Context, c *models.AuthCode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codes[c.Code] = c
 }
 
+// PopCode retrieves and deletes an authorization code (single-use).
 func (s *Store) PopCode(ctx context.Context, code string) (*models.AuthCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,6 +140,7 @@ func (s *Store) PopCode(ctx context.Context, code string) (*models.AuthCode, err
 	return c, nil
 }
 
+// SaveToken stores an access token and its associated refresh token.
 func (s *Store) SaveToken(ctx context.Context, t *models.Token) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -141,6 +150,7 @@ func (s *Store) SaveToken(ctx context.Context, t *models.Token) {
 	}
 }
 
+// GetByAccessToken retrieves a token by its access token string.
 func (s *Store) GetByAccessToken(ctx context.Context, token string) (*models.Token, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -151,6 +161,7 @@ func (s *Store) GetByAccessToken(ctx context.Context, token string) (*models.Tok
 	return t, nil
 }
 
+// GetByRefreshToken retrieves a token by its refresh token string.
 func (s *Store) GetByRefreshToken(ctx context.Context, token string) (*models.Token, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -161,6 +172,7 @@ func (s *Store) GetByRefreshToken(ctx context.Context, token string) (*models.To
 	return t, nil
 }
 
+// RevokeAccessToken removes an access token and its associated refresh token.
 func (s *Store) RevokeAccessToken(ctx context.Context, token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -170,6 +182,7 @@ func (s *Store) RevokeAccessToken(ctx context.Context, token string) {
 	delete(s.tokens, token)
 }
 
+// CreateUser adds a new user to the store.
 func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -195,6 +208,7 @@ func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
 	return errors.New("unable to create user")
 }
 
+// RevokeRefreshToken removes a refresh token.
 func (s *Store) RevokeRefreshToken(ctx context.Context, token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -19,6 +19,8 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
+// TokenHandler handles OAuth 2.0 token requests.
+// It supports authorization_code, refresh_token, and client_credentials grant types.
 func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -101,6 +103,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 	}
 }
 
+// handleAuthorizationCode handles the authorization_code grant type.
 func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (*models.Token, error) {
 	code := r.FormValue("code")
 	redirectURI := r.FormValue("redirect_uri")
@@ -147,6 +150,7 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 	return tok, nil
 }
 
+// handleRefreshToken handles the refresh_token grant type.
 func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) {
 	refreshToken := r.FormValue("refresh_token")
 	if refreshToken == "" {
@@ -171,6 +175,7 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) 
 	return tok, nil
 }
 
+// handleClientCredentials handles the client_credentials grant type.
 func handleClientCredentials(clientID string) (*models.Token, error) {
 	t := newToken(clientID, clientID, "read")
 	t.RefreshToken = "" // not issued for client_credentials
@@ -193,6 +198,7 @@ func newToken(userID, clientID, scope string) *models.Token {
 }
 
 // signJWT creates a signed RS256 JWT using the token metadata as claims.
+// signJWT creates a signed RS256 JWT for the access token.
 func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
@@ -208,6 +214,7 @@ func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, err
 }
 
 // extractClientCredentials supports both HTTP Basic Auth and form body.
+// extractClientCredentials extracts client ID and secret from the request.
 func extractClientCredentials(r *http.Request) (id, secret string) {
 	if id, secret, ok := r.BasicAuth(); ok {
 		return id, secret
@@ -225,6 +232,7 @@ func tokenError(w http.ResponseWriter, errCode, desc string) {
 }
 
 // verifyPKCE verifies code_verifier against code_challenge per RFC 7636
+// verifyPKCE verifies the code_verifier against the code_challenge using S256.
 func verifyPKCE(challenge, verifier string) bool {
 	h := sha256.Sum256([]byte(verifier))
 	computed := base64.RawURLEncoding.EncodeToString(h[:])
@@ -233,6 +241,7 @@ func verifyPKCE(challenge, verifier string) bool {
 
 // signIDToken creates a signed RS256 JWT using the token metadata as OIDC claims,
 // including nonce (if provided) and at_hash (hash of access token).
+// signIDToken creates a signed RS256 JWT for the ID token.
 func signIDToken(ctx context.Context, tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer string) (string, error) {
 	now := time.Now()
 

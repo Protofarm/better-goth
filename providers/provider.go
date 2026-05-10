@@ -8,12 +8,14 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// Provider represents an OIDC authentication provider.
 type Provider struct {
 	name     string
 	config   *oauth2.Config
 	verifier *oidc.IDTokenVerifier
 }
 
+// NewProvider creates a new Provider with the given configuration.
 func NewProvider(name, issuerURL, clientID, clientSecret, redirectURL string, scopes []string) (*Provider, error) {
 	provider, err := oidc.NewProvider(context.Background(), issuerURL)
 	if err != nil {

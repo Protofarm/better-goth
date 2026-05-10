@@ -145,7 +145,16 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store verifier and nonce in cookies
+	// Store state, verifier and nonce in secure cookies
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "oauth_code_verifier",
 		Value:    codeVerifier,
@@ -313,11 +322,28 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		MaxAge: -1,
 	})
 
-	token, err := provider.Config().Exchange(r.Context(), code)
+	// Retrieve code_verifier from cookie for PKCE validation
+	verifierCookie, err := r.Cookie("oauth_code_verifier")
 	if err != nil {
-		http.Error(w, "failed to exchange token", http.StatusInternalServerError)
+		http.Error(w, "code_verifier cookie missing", http.StatusBadRequest)
 		return
 	}
+	codeVerifier := verifierCookie.Value
+
+	// OAuth 2.1: Exchange code with PKCE code_verifier parameter
+	token, err := exchangeWithPKCE(r.Context(), provider.Config(), code, codeVerifier)
+	if err != nil {
+		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Clear code_verifier cookie after successful exchange
+	http.SetCookie(w, &http.Cookie{
+		Name:   "oauth_code_verifier",
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
 
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
@@ -341,6 +367,22 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok || subject == "" {
 		http.Error(w, "missing subject claim", http.StatusInternalServerError)
 		return
+	}
+
+	// OpenID Connect: Validate nonce to prevent token replay attacks (OAuth 2.1)
+	if nonceCookie, err := r.Cookie("oauth_nonce"); err == nil {
+		claimNonce, ok := claims["nonce"].(string)
+		if !ok || claimNonce != nonceCookie.Value {
+			http.Error(w, "nonce mismatch - possible replay attack", http.StatusBadRequest)
+			return
+		}
+		// Clear nonce cookie after validation
+		http.SetCookie(w, &http.Cookie{
+			Name:   "oauth_nonce",
+			Value:  "",
+			Path:   "/",
+			MaxAge: -1,
+		})
 	}
 
 	signedToken, err := a.signJWT(subject, token.Expiry)

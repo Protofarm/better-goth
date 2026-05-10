@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -41,7 +42,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 			return
 		}
 
-		client, err := s.GetClient(clientID)
+		client, err := s.GetClient(r.Context(), clientID)
 		if err != nil || client.ClientSecret != clientSecret {
 			w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
 			tokenError(w, "invalid_client", "client authentication failed")
@@ -73,7 +74,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 			return
 		}
 		tok.AccessToken = accessJWT
-		s.SaveToken(tok)
+		s.SaveToken(r.Context(), tok)
 
 		resp := map[string]interface{}{
 			"access_token":  tok.AccessToken,
@@ -84,7 +85,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 		}
 
 		if strings.Contains(tok.Scope, "openid") || grantType == "authorization_code" {
-			if idToken, err := signIDToken(tok, s, privateKey, issuer); err == nil {
+			if idToken, err := signIDToken(r.Context(), tok, s, privateKey, issuer); err == nil {
 				resp["id_token"] = idToken
 			}
 		}
@@ -110,7 +111,7 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 		return nil, fmt.Errorf("code parameter is required")
 	}
 
-	authCode, err := s.PopCode(code) // also deletes it (single-use)
+	authCode, err := s.PopCode(r.Context(), code) // also deletes it (single-use)
 	if err != nil {
 		return nil, fmt.Errorf("invalid authorization code")
 	}
@@ -123,16 +124,18 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 	if authCode.RedirectURI != redirectURI {
 		return nil, fmt.Errorf("redirect_uri mismatch")
 	}
+	// OAuth 2.1: PKCE is mandatory
 	if authCode.CodeChallenge == "" {
-		return nil, fmt.Errorf("PKCE (code_challenge) is required per OAuth 2.1")
+		return nil, fmt.Errorf("PKCE (code_challenge) was missing in authorization request")
 	}
 
 	if verifier == "" {
-		return nil, fmt.Errorf("code_verifier is required")
+		return nil, fmt.Errorf("code_verifier is required for authorization_code grant (mandatory per OAuth 2.1)")
 	}
 
+	// OAuth 2.1: S256 is the only allowed code_challenge_method
 	if authCode.CodeChallengeMethod != "S256" {
-		return nil, fmt.Errorf("only S256 code_challenge_method is allowed")
+		return nil, fmt.Errorf("unsupported code_challenge_method: only 'S256' is allowed")
 	}
 
 	if !verifyPKCE(authCode.CodeChallenge, verifier) {
@@ -150,7 +153,7 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) 
 		return nil, fmt.Errorf("refresh_token parameter is required")
 	}
 
-	old, err := s.GetByRefreshToken(refreshToken)
+	old, err := s.GetByRefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		return nil, fmt.Errorf("invalid refresh token")
 	}
@@ -159,7 +162,7 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) 
 		return nil, fmt.Errorf("refresh token expired")
 	}
 	//revoke old refresh token
-	s.RevokeRefreshToken(refreshToken)
+	s.RevokeRefreshToken(r.Context(), refreshToken)
 
 	// RFC 6749 Section 6: Refresh token rotation (implicit revocation of old token)
 	// Generate new token pair
@@ -230,10 +233,10 @@ func verifyPKCE(challenge, verifier string) bool {
 
 // signIDToken creates a signed RS256 JWT using the token metadata as OIDC claims,
 // including nonce (if provided) and at_hash (hash of access token).
-func signIDToken(tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer string) (string, error) {
+func signIDToken(ctx context.Context, tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer string) (string, error) {
 	now := time.Now()
 
-	user, err := s.GetUserByID(tok.UserID)
+	user, err := s.GetUserByID(ctx, tok.UserID)
 	if err != nil {
 		return "", fmt.Errorf("user not found for id_token claims")
 	}

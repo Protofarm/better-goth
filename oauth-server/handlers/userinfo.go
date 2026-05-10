@@ -27,7 +27,7 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 				return
 			}
 			raw := strings.TrimPrefix(authHeader, "Bearer ")
-			tok, err := s.GetByAccessToken(raw)
+			tok, err := s.GetByAccessToken(r.Context(), raw)
 			if err != nil || time.Now().After(tok.ExpiresAt) {
 				http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
 				return
@@ -35,7 +35,7 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 			userID = tok.UserID
 		}
 
-		user, err := s.GetUserByID(userID)
+		user, err := s.GetUserByID(r.Context(), userID)
 		if err != nil {
 			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
 			return

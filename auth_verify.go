@@ -11,11 +11,15 @@ import (
 )
 
 var (
+	// ErrMissingAuthHeader is returned when the Authorization header is missing.
 	ErrMissingAuthHeader = errors.New("missing authorization header")
+	// ErrInvalidAuthHeader is returned when the Authorization header is malformed.
 	ErrInvalidAuthHeader = errors.New("invalid authorization header")
-	ErrInvalidToken      = errors.New("invalid token")
+	// ErrInvalidToken is returned when the JWT token is invalid.
+	ErrInvalidToken = errors.New("invalid token")
 )
 
+// VerifiedUser represents a user whose token has been verified.
 type VerifiedUser struct {
 	Subject string
 	Claims  jwt.RegisteredClaims
@@ -24,6 +28,7 @@ type VerifiedUser struct {
 
 type verifiedUserContextKey struct{}
 
+// VerifyToken parses and validates a JWT token string.
 func (a *Auth) VerifyToken(tokenString string) (*VerifiedUser, error) {
 	if a == nil || len(a.jwtSecret) == 0 {
 		return nil, ErrMissingJWTSecret
@@ -61,6 +66,7 @@ func (a *Auth) VerifyToken(tokenString string) (*VerifiedUser, error) {
 	}, nil
 }
 
+// VerifyRequest extracts and verifies the Bearer token from the request's Authorization header.
 func (a *Auth) VerifyRequest(r *http.Request) (*VerifiedUser, error) {
 	authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authHeader == "" {
@@ -75,6 +81,7 @@ func (a *Auth) VerifyRequest(r *http.Request) (*VerifiedUser, error) {
 	return a.VerifyToken(parts[1])
 }
 
+// RequireAuth is a middleware that enforces authentication by verifying the Bearer token in the request.
 func (a *Auth) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, err := a.VerifyRequest(r)
@@ -88,6 +95,7 @@ func (a *Auth) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
+// UserFromContext retrieves the VerifiedUser from the context, if present.
 func UserFromContext(ctx context.Context) (*VerifiedUser, bool) {
 	user, ok := ctx.Value(verifiedUserContextKey{}).(*VerifiedUser)
 	if !ok || user == nil {

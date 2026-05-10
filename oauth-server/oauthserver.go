@@ -11,6 +11,7 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
+// CreateOAuthServer initializes and returns a new OAuth 2.0 and OpenID Connect server.
 func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, redirectURIs []string) (*http.ServeMux, error) {
 	privateKey, err := keys.LoadOrGenerate(keyFile)
 	if err != nil {

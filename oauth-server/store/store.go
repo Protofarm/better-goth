@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -84,7 +85,7 @@ func (s *Store) seed(cfg Config) {
 	}
 }
 
-func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {
+func (s *Store) GetUserByCredentials(ctx context.Context, username, password string) (*models.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u, ok := s.byName[username]
@@ -94,7 +95,7 @@ func (s *Store) GetUserByCredentials(username, password string) (*models.User, e
 	return u, nil
 }
 
-func (s *Store) GetUserByID(id string) (*models.User, error) {
+func (s *Store) GetUserByID(ctx context.Context, id string) (*models.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u, ok := s.users[id]
@@ -104,7 +105,7 @@ func (s *Store) GetUserByID(id string) (*models.User, error) {
 	return u, nil
 }
 
-func (s *Store) GetClient(id string) (*models.Client, error) {
+func (s *Store) GetClient(ctx context.Context, id string) (*models.Client, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	c, ok := s.clients[id]
@@ -114,13 +115,13 @@ func (s *Store) GetClient(id string) (*models.Client, error) {
 	return c, nil
 }
 
-func (s *Store) SaveCode(c *models.AuthCode) {
+func (s *Store) SaveCode(ctx context.Context, c *models.AuthCode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.codes[c.Code] = c
 }
 
-func (s *Store) PopCode(code string) (*models.AuthCode, error) {
+func (s *Store) PopCode(ctx context.Context, code string) (*models.AuthCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.codes[code]
@@ -131,7 +132,7 @@ func (s *Store) PopCode(code string) (*models.AuthCode, error) {
 	return c, nil
 }
 
-func (s *Store) SaveToken(t *models.Token) {
+func (s *Store) SaveToken(ctx context.Context, t *models.Token) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tokens[t.AccessToken] = t
@@ -140,7 +141,7 @@ func (s *Store) SaveToken(t *models.Token) {
 	}
 }
 
-func (s *Store) GetByAccessToken(token string) (*models.Token, error) {
+func (s *Store) GetByAccessToken(ctx context.Context, token string) (*models.Token, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t, ok := s.tokens[token]
@@ -150,7 +151,7 @@ func (s *Store) GetByAccessToken(token string) (*models.Token, error) {
 	return t, nil
 }
 
-func (s *Store) GetByRefreshToken(token string) (*models.Token, error) {
+func (s *Store) GetByRefreshToken(ctx context.Context, token string) (*models.Token, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	t, ok := s.refresh[token]
@@ -160,7 +161,7 @@ func (s *Store) GetByRefreshToken(token string) (*models.Token, error) {
 	return t, nil
 }
 
-func (s *Store) RevokeAccessToken(token string) {
+func (s *Store) RevokeAccessToken(ctx context.Context, token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t, ok := s.tokens[token]; ok {
@@ -169,7 +170,7 @@ func (s *Store) RevokeAccessToken(token string) {
 	delete(s.tokens, token)
 }
 
-func (s *Store) CreateUser(user *models.User) error {
+func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -194,7 +195,7 @@ func (s *Store) CreateUser(user *models.User) error {
 	return errors.New("unable to create user")
 }
 
-func (s *Store) RevokeRefreshToken(token string) {
+func (s *Store) RevokeRefreshToken(ctx context.Context, token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.refresh, token)

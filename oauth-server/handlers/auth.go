@@ -32,7 +32,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 		}
 
 		// RFC 6749 Section 3.1.1: client_id is required
-		client, err := s.GetClient(clientID)
+		client, err := s.GetClient(r.Context(), clientID)
 		if err != nil {
 			http.Error(w, `{"error":"invalid_client","error_description":"client_id is invalid or missing"}`, http.StatusBadRequest)
 			return
@@ -49,15 +49,18 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			redirectWithError(w, r, redirectURI, "invalid_request", "state parameter is required", "")
 			return
 		}
+
+		// OAuth 2.1: PKCE is mandatory
 		if codeChallenge == "" {
 			redirectWithError(w, r, redirectURI, "invalid_request",
 				"code_challenge parameter is required (PKCE is mandatory per OAuth 2.1)", state)
 			return
 		}
 
+		// OAuth 2.1: S256 is the only allowed code_challenge_method
 		if codeChallengeMethod != "S256" {
 			redirectWithError(w, r, redirectURI, "invalid_request",
-				"only S256 code_challenge_method is allowed", state)
+				"code_challenge_method must be 'S256' (mandatory per OAuth 2.1)", state)
 			return
 		}
 
@@ -75,11 +78,12 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 
 			if signupUsername := r.FormValue("signup_username"); signupUsername != "" {
 				user = &models.User{Username: signupUsername, Email: r.FormValue("signup_email"), Name: r.FormValue("signup_name"), Password: r.FormValue("signup_password")}
-				err = s.CreateUser(user)
+				err = s.CreateUser(r.Context(), user)
 				msg = "Username or email already taken."
 
 			} else {
 				user, err = s.GetUserByCredentials(
+					r.Context(),
 					r.FormValue("username"),
 					r.FormValue("password"),
 				)
@@ -105,7 +109,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 			rand.Read(b)
 			code := hex.EncodeToString(b)
 
-			s.SaveCode(&models.AuthCode{
+			s.SaveCode(r.Context(), &models.AuthCode{
 				Code:                code,
 				ClientID:            clientID,
 				UserID:              user.ID,

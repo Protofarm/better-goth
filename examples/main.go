@@ -163,26 +163,42 @@ func main() {
 		log.Println("No .env loaded, using environment variables as-is")
 	}
 
+	devMode := envBoolOrDefault("DEV_MODE", false)
+
 	appPort := normalizePort(envOrDefault("APP_PORT", "3000"))
-	oauthServerIssuer := envOrDefault("OAUTH_SERVER_ISSUER_URL", "http://localhost:8080")
+	appScheme := "http"
+	oauthScheme := "http"
+	if !devMode {
+		appScheme = "https"
+		oauthScheme = "https"
+	}
+
+	oauthServerIssuer := envOrDefault("OAUTH_SERVER_ISSUER_URL", fmt.Sprintf("%s://localhost:8080", oauthScheme))
 	oauthServerClientID := envOrDefault("OAUTH_SERVER_CLIENT_ID", "my-client")
 	oauthServerClientSecret := envOrDefault("OAUTH_SERVER_CLIENT_SECRET", "my-secret")
 	googleClientID := envOrDefault("GOOGLE_CLIENT_ID", "")
 	googleClientSecret := envOrDefault("GOOGLE_CLIENT_SECRET", "")
 	jwtSecret := envOrDefault("JWT_SECRET", "replace-with-at-least-32-bytes-secret")
-	jwtCookieSecure = envBoolOrDefault("JWT_COOKIE_SECURE", false)
+	jwtCookieSecure = !devMode
 
 	oauthPort := normalizePort(envOrDefault("OAUTH_SERVER_PORT", "8080"))
 	keyFile := envOrDefault("OAUTH_SERVER_KEY_FILE", "private.pem")
-	defaultRedirectURI := fmt.Sprintf("http://localhost:%s/callback/oauthserver", appPort)
+	defaultRedirectURI := fmt.Sprintf("%s://localhost:%s/callback/oauthserver", appScheme, appPort)
 	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", defaultRedirectURI))
 
+	tlsCert := envOrDefault("OAUTH_SERVER_TLS_CERT", "")
+	tlsKey := envOrDefault("OAUTH_SERVER_TLS_KEY", "")
+
 	// use default oauth server implementation, can be managed automatically
-	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyFile, oauthServerClientID, oauthServerClientSecret, redirectURIs)
+	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyFile, oauthServerClientID, oauthServerClientSecret, redirectURIs, devMode)
 	go func() {
 		listenAddr := ":" + oauthPort
 		log.Printf("OAuth 2.0 server listening on %s", listenAddr)
-		log.Fatal(http.ListenAndServe(listenAddr, oauthServer))
+		if devMode || tlsCert == "" || tlsKey == "" {
+			log.Fatal(http.ListenAndServe(listenAddr, oauthServer))
+		} else {
+			log.Fatal(http.ListenAndServeTLS(listenAddr, tlsCert, tlsKey, oauthServer))
+		}
 	}()
 
 	providerLoginPath := "/login/" + providers.OAuthServerProviderName
@@ -198,7 +214,7 @@ func main() {
 		oauthServerIssuer,
 		oauthServerClientID,
 		oauthServerClientSecret,
-		fmt.Sprintf("http://localhost:%s/callback/%s", appPort, providers.OAuthServerProviderName),
+		fmt.Sprintf("%s://localhost:%s/callback/%s", appScheme, appPort, providers.OAuthServerProviderName),
 		[]string{},
 	)
 	if err != nil {
@@ -209,6 +225,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	auth.SetDevMode(devMode)
 
 	store := newTokenStore()
 
@@ -258,7 +275,7 @@ func main() {
 		googleProvider, err := providers.NewGoogleProvider(
 			googleClientID,
 			googleClientSecret,
-			fmt.Sprintf("http://localhost:%s/callback/google", appPort),
+			fmt.Sprintf("%s://localhost:%s/callback/google", appScheme, appPort),
 			[]string{},
 		)
 		if err != nil {
@@ -288,7 +305,7 @@ func main() {
 				{
 					"issuer":    strings.TrimRight(oauthServerIssuer, "/"),
 					"client_id": oauthServerClientID,
-					"scopes": []string{"openid", "profile", "email"},
+					"scopes":    []string{"openid", "profile", "email"},
 				},
 			},
 		}
@@ -415,9 +432,9 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"sub":              user.Subject,
-			"message":          "protected resource access granted",
-			"authentication":   "session cookie",
+			"sub":            user.Subject,
+			"message":        "protected resource access granted",
+			"authentication": "session cookie",
 		})
 	})))
 
@@ -437,9 +454,9 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"sub":               user.Subject,
-			"message":           "protected resource access granted",
-			"authentication":    "Bearer token",
+			"sub":            user.Subject,
+			"message":        "protected resource access granted",
+			"authentication": "Bearer token",
 		})
 	})
 

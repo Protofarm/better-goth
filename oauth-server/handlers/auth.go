@@ -12,7 +12,7 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func AuthorizeHandler(s *store.Store) http.HandlerFunc {
+func AuthorizeHandler(s *store.Store, devMode bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		clientID := q.Get("client_id")
@@ -39,7 +39,7 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 		}
 
 		// RFC 6749 Section 3.1.2.1: redirect_uri must be registered
-		if !isValidRedirect(client.RedirectURIs, redirectURI) {
+		if !isValidRedirect(client.RedirectURIs, redirectURI, devMode) {
 			http.Error(w, `{"error":"invalid_redirect_uri","error_description":"redirect_uri is not registered"}`, http.StatusBadRequest)
 			return
 		}
@@ -139,7 +139,19 @@ func AuthorizeHandler(s *store.Store) http.HandlerFunc {
 	}
 }
 
-func isValidRedirect(allowed []string, uri string) bool {
+func isValidRedirect(allowed []string, uri string, devMode bool) bool {
+	parsedURI, err := url.Parse(uri)
+	if err != nil {
+		return false
+	}
+
+	hostname := parsedURI.Hostname()
+	isLoopback := hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1"
+
+	if !devMode && !isLoopback && parsedURI.Scheme != "https" {
+		return false
+	}
+
 	for _, a := range allowed {
 		if a == uri {
 			return true

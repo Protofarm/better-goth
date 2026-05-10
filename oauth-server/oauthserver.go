@@ -11,7 +11,7 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, redirectURIs []string) (*http.ServeMux, error) {
+func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, redirectURIs []string, devMode bool) (*http.ServeMux, error) {
 	privateKey, err := keys.LoadOrGenerate(keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("RSA key: %v", err)
@@ -21,10 +21,11 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 		DefaultClientID:     clientID,
 		DefaultClientSecret: clientSecret,
 		DefaultRedirectURIs: redirectURIs,
+		DevMode:             devMode,
 	})
 	requireAuth := middleware.RequireAuth(publicKey)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s))
+	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey, issuerURL))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(publicKey))

@@ -21,7 +21,7 @@ import (
 func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method_not_allowed", http.StatusMethodNotAllowed)
+			tokenError(w, "method_not_allowed", "only POST method is allowed")
 			return
 		}
 		if err := r.ParseForm(); err != nil {

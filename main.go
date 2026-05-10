@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,6 +65,7 @@ type Auth struct {
 	jwtSecret         []byte
 	userHandler       UserHandler
 	authResultHandler AuthResultHandler
+	CookieSecure      bool
 }
 
 func (a *Auth) SetUserHandler(h UserHandler) {
@@ -90,9 +92,17 @@ func NewAuth(secret []byte) (*Auth, error) {
 	}
 
 	return &Auth{
-		Providers: map[string]Provider{},
-		jwtSecret: append([]byte(nil), secret...),
+		Providers:    map[string]Provider{},
+		jwtSecret:    append([]byte(nil), secret...),
+		CookieSecure: true,
 	}, nil
+}
+
+func (a *Auth) SetDevMode(devMode bool) {
+	a.CookieSecure = !devMode
+	if devMode {
+		log.Println("DEV_MODE enabled - using HTTP. Do NOT use in production.")
+	}
 }
 
 func (a *Auth) AddProvider(provider Provider) {
@@ -151,7 +161,7 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   a.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -160,9 +170,9 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    codeVerifier,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   a.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   600,
+		MaxAge:   300,
 	})
 
 	http.SetCookie(w, &http.Cookie{
@@ -170,9 +180,9 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		Value:    nonce,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   a.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   600,
+		MaxAge:   300,
 	})
 
 	// REPLACE authURL generation:

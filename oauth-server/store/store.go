@@ -7,6 +7,7 @@ import (
 
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Store struct {
@@ -24,6 +25,7 @@ type Config struct {
 	DefaultClientID     string
 	DefaultClientSecret string
 	DefaultRedirectURIs []string
+	DevMode             bool
 }
 
 func NewStore(cfg Config) *Store {
@@ -38,6 +40,17 @@ func NewStore(cfg Config) *Store {
 	}
 	s.seed(cfg)
 	return s
+}
+
+// hashPassword hashes a password using bcrypt with cost 12
+func hashPassword(password string) (string, error) {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(hashed), err
+}
+
+// verifyPassword compares a plaintext password with a bcrypt hash
+func verifyPassword(hash, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 }
 
 func (s *Store) seed(cfg Config) {
@@ -63,11 +76,14 @@ func (s *Store) seed(cfg Config) {
 	}
 
 	avatar, _ := models.ParseURL("https://avatars.githubusercontent.com/u/1?v=4")
+
+	hashedPassword, _ := hashPassword("secret")
+
 	//example user - in production, store hashed passwords and use a proper user management system
 	u := &models.User{
 		ID:        "user-001",
 		Username:  "john",
-		Password:  "secret", // hash with bcrypt in production
+		Password:  hashedPassword,
 		Email:     "john@example.com",
 		Name:      "John Doe",
 		AvatarURL: avatar,
@@ -88,7 +104,10 @@ func (s *Store) GetUserByCredentials(username, password string) (*models.User, e
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	u, ok := s.byName[username]
-	if !ok || u.Password != password {
+	if !ok {
+		return nil, errors.New("invalid credentials")
+	}
+	if err := verifyPassword(u.Password, password); err != nil {
 		return nil, errors.New("invalid credentials")
 	}
 	return u, nil

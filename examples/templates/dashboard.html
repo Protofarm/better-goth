@@ -77,9 +77,43 @@
 <body>
   <h1>Dashboard</h1>
   <p>You are authenticated. This page is protected by <code>RequireAuth</code>.</p>
-  <form action="/signout" method="post" style="margin: 1rem 0;">
+  <form id="signout-form" style="margin: 1rem 0;">
     <button class="button" type="submit">Sign out</button>
   </form>
+
+  <script>
+    document.getElementById('signout-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      // Get access token from localStorage (if stored there)
+      const accessToken = localStorage.getItem('access_token');
+      
+      if (accessToken) {
+        try {
+          // Revoke the access token on the server
+          const response = await fetch('/oauth/token/revocation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              token: accessToken,
+              token_type_hint: 'access_token'
+            })
+          });
+          
+          if (response.ok) {
+            console.log('Token revoked successfully');
+          }
+        } catch (err) {
+          console.error('Revocation failed:', err);
+        }
+      }
+      
+      // Clear all stored tokens and redirect
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/';
+    });
+  </script>
 
   <div class="grid">
     <section class="card">

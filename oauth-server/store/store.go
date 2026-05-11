@@ -216,5 +216,8 @@ func (s *Store) CreateUser(user *models.User) error {
 func (s *Store) RevokeRefreshToken(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if t, ok := s.refresh[token]; ok {
+		delete(s.tokens, t.AccessToken)
+	}
 	delete(s.refresh, token)
 }

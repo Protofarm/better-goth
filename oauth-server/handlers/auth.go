@@ -201,6 +201,13 @@ const authPageHTML = `<!DOCTYPE html>
 	h2{margin:0 0 20px;font-size:20px}
 	.msg-error{color:#c0392b;margin:0 0 12px}
 	.msg-success{color:#0f7a2a;margin:0 0 12px}
+	.consent{margin:0 0 24px;padding:24px 24px 20px;border:1px solid #c7d2fe;border-radius:16px;background:linear-gradient(180deg,#eff6ff 0%,#ffffff 100%);box-shadow:0 10px 24px rgba(37,99,235,.12)}
+	.consent-eyebrow{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;margin-bottom:12px}
+	.consent h3{margin:0 0 8px;font-size:24px;line-height:1.15;color:#0f172a}
+	.consent p{margin:0 0 14px;color:#334155;font-size:15px;line-height:1.5;max-width:56ch}
+	.consent ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+	.consent li{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #dbe4ff;border-radius:12px;background:#fff;color:#0f172a;font-size:15px;line-height:1.45}
+	.consent li::before{content:"";flex:0 0 20px;width:20px;height:20px;margin-top:1px;border-radius:999px;background:#2563eb url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M8.1 13.2 5.2 10.3l-1.2 1.2 4.1 4.1L16 7.7l-1.2-1.2-6.7 6.7z' fill='%23fff'/%3E%3C/svg%3E") center/12px 12px no-repeat;box-shadow:0 4px 10px rgba(37,99,235,.25)}
 	.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
 	.panel{border:1px solid #e5e5e5;border-radius:10px;padding:16px}
 	.panel h3{margin:0 0 12px;font-size:17px}
@@ -218,6 +225,18 @@ const authPageHTML = `<!DOCTYPE html>
 	<h2>{{.Title}}</h2>
 	{{if .ErrorMessage}}<p class="msg-error">{{.ErrorMessage}}</p>{{end}}
 	{{if .SuccessMessage}}<p class="msg-success">{{.SuccessMessage}}</p>{{end}}
+
+	{{if not .StandaloneSignup}}
+	<div class="consent">
+		<div class="consent-eyebrow">Review access</div>
+		<h3>Authorize "MyApp" to:</h3>
+		<ul>
+			<li>See your email address</li>
+			<li>Access your profile</li>
+			<li>Offline access</li>
+		</ul>
+	</div>
+	{{end}}
 
 	{{if .StandaloneSignup}}
 	<div class="panel">

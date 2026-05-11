@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	errs "github.com/Protofarm/better-goth/oauth-server/errors"
 	"github.com/Protofarm/better-goth/oauth-server/middleware"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
@@ -23,13 +24,13 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 		if userID == "" {
 			authHeader := r.Header.Get("Authorization")
 			if !strings.HasPrefix(authHeader, "Bearer ") {
-				http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+				errs.HTTPError(w, errs.JSONErrUnauthorized, http.StatusUnauthorized)
 				return
 			}
 			raw := strings.TrimPrefix(authHeader, "Bearer ")
 			tok, err := s.GetByAccessToken(raw)
 			if err != nil || time.Now().After(tok.ExpiresAt) {
-				http.Error(w, `{"error":"invalid_token"}`, http.StatusUnauthorized)
+				errs.HTTPError(w, errs.JSONErrInvalidToken, http.StatusUnauthorized)
 				return
 			}
 			userID = tok.UserID
@@ -37,7 +38,7 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 
 		user, err := s.GetUserByID(userID)
 		if err != nil {
-			http.Error(w, `{"error":"user_not_found"}`, http.StatusNotFound)
+			errs.HTTPError(w, errs.JSONErrUserNotFound, http.StatusNotFound)
 			return
 		}
 

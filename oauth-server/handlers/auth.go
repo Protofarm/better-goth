@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	errs "github.com/Protofarm/better-goth/oauth-server/errors"
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
@@ -27,37 +28,37 @@ func AuthorizeHandler(s *store.Store, devMode bool) http.HandlerFunc {
 		// RFC 6749 Section 3.1.1: response_type is required
 		if responseType != "code" {
 			// Cannot redirect without valid redirect_uri, so return direct error
-			http.Error(w, `{"error":"unsupported_response_type","error_description":"response_type must be 'code'"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrUnsupportedResponseType, http.StatusBadRequest)
 			return
 		}
 
 		// RFC 6749 Section 3.1.1: client_id is required
 		client, err := s.GetClient(clientID)
 		if err != nil {
-			http.Error(w, `{"error":"invalid_client","error_description":"client_id is invalid or missing"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidClient, http.StatusBadRequest)
 			return
 		}
 
 		// RFC 6749 Section 3.1.2.1: redirect_uri must be registered
 		if !isValidRedirect(client.RedirectURIs, redirectURI, devMode) {
-			http.Error(w, `{"error":"invalid_redirect_uri","error_description":"redirect_uri is not registered"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRedirectURI, http.StatusBadRequest)
 			return
 		}
 
 		// RFC 6749 Section 3.1.1: state is required (best practice, enforced here)
 		if state == "" {
-			redirectWithError(w, r, redirectURI, "invalid_request", "state parameter is required", "")
+			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest, errs.MsgStateRequired, "")
 			return
 		}
 		if codeChallenge == "" {
-			redirectWithError(w, r, redirectURI, "invalid_request",
-				"code_challenge parameter is required (PKCE is mandatory per OAuth 2.1)", state)
+			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest,
+				errs.MsgCodeChallengeRequired, state)
 			return
 		}
 
 		if codeChallengeMethod != "S256" {
-			redirectWithError(w, r, redirectURI, "invalid_request",
-				"only S256 code_challenge_method is allowed", state)
+			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest,
+				errs.MsgOnlyS256Allowed, state)
 			return
 		}
 
@@ -158,18 +159,6 @@ func isValidRedirect(allowed []string, uri string, devMode bool) bool {
 		}
 	}
 	return false
-}
-
-func redirectWithError(w http.ResponseWriter, r *http.Request, redirectURI, errCode, desc, state string) {
-	dest, _ := url.Parse(redirectURI)
-	p := url.Values{}
-	p.Set("error", errCode)
-	p.Set("error_description", desc)
-	if state != "" {
-		p.Set("state", state)
-	}
-	dest.RawQuery = p.Encode()
-	http.Redirect(w, r, dest.String(), http.StatusFound)
 }
 
 type authPageData struct {

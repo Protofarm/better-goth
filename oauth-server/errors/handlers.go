@@ -1,0 +1,50 @@
+package errors
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+)
+
+// TokenError writes an OAuth 2.0 error response for the token endpoint
+// RFC 6749 Section 5.2: Error Response
+func TokenError(w http.ResponseWriter, errCode, desc string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{
+		"error":             errCode,
+		"error_description": desc,
+	})
+}
+
+// RedirectError writes an error response that redirects with error parameters
+// RFC 6749 Section 4.1.2.1: Error Response
+func RedirectError(w http.ResponseWriter, r *http.Request, redirectURI, errCode, desc, state string) {
+	dest, _ := url.Parse(redirectURI)
+	p := url.Values{}
+	p.Set("error", errCode)
+	p.Set("error_description", desc)
+	if state != "" {
+		p.Set("state", state)
+	}
+	dest.RawQuery = p.Encode()
+	http.Redirect(w, r, dest.String(), http.StatusFound)
+}
+
+// WriteError writes an OAuth 2.0 error response for resource servers
+// RFC 6750 Section 3: Error Response
+func WriteError(w http.ResponseWriter, status int, errCode, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s"`, errCode))
+	w.WriteHeader(status)
+	fmt.Fprintf(w, `{"error":%q,"error_description":%q}`, errCode, description)
+}
+
+// HTTPError writes a generic error response using JSON
+// Used for endpoints like introspection, revocation, userinfo when they need to return JSON errors
+func HTTPError(w http.ResponseWriter, errJSON string, status int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	w.Write([]byte(errJSON))
+}

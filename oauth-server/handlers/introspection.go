@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	errs "github.com/Protofarm/better-goth/oauth-server/errors"
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 	"github.com/golang-jwt/jwt/v5"
@@ -16,31 +17,31 @@ func IntrospectionHandler(s *store.Store, pubKey *rsa.PublicKey) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			http.Error(w, `{"error":"method_not_allowed"}`, http.StatusMethodNotAllowed)
+			errs.HTTPError(w, errs.JSONErrIntrospectionMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 
 		// RFC 7662 Section 2.1: client authentication is required for introspection.
 		clientID, clientSecret := extractClientCredentials(r)
 		if clientID == "" {
-			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		client, err := s.GetClient(clientID)
 		if err != nil || client.ClientSecret != clientSecret {
-			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		if err := r.ParseForm(); err != nil {
-			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		token := r.Form.Get("token")
 		if token == "" {
-			http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
 			return
 		}
 

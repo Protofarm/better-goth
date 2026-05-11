@@ -14,6 +14,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	errs "github.com/Protofarm/better-goth/oauth-server/errors"
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
@@ -21,30 +22,30 @@ import (
 func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			tokenError(w, "method_not_allowed", "only POST method is allowed")
+			errs.TokenError(w, errs.CodeMethodNotAllowed, errs.MsgOnlyPostAllowed)
 			return
 		}
 		if err := r.ParseForm(); err != nil {
-			tokenError(w, "invalid_request", "could not parse form body")
+			errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgCouldNotParseForm)
 			return
 		}
 
 		grantType := r.FormValue("grant_type")
 		if grantType == "" {
-			tokenError(w, "invalid_request", "grant_type parameter is required")
+			errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgGrantTypeRequired)
 			return
 		}
 
 		clientID, clientSecret := extractClientCredentials(r)
 		if clientID == "" {
-			tokenError(w, "invalid_request", "client_id is required")
+			errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgClientIDRequired)
 			return
 		}
 
 		client, err := s.GetClient(clientID)
 		if err != nil || client.ClientSecret != clientSecret {
 			w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
-			tokenError(w, "invalid_client", "client authentication failed")
+			errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
 			return
 		}
 
@@ -58,18 +59,18 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 		case "client_credentials":
 			tok, err = handleClientCredentials(clientID)
 		default:
-			tokenError(w, "unsupported_grant_type", fmt.Sprintf("grant_type %q is not supported", grantType))
+			errs.TokenError(w, errs.CodeUnsupportedGrantType, fmt.Sprintf("grant_type %q is not supported", grantType))
 			return
 		}
 
 		if err != nil {
-			tokenError(w, "invalid_grant", err.Error())
+			errs.TokenError(w, errs.CodeInvalidGrant, err.Error())
 			return
 		}
 
 		accessJWT, err := signJWT(tok, privateKey, issuer)
 		if err != nil {
-			tokenError(w, "server_error", "failed to sign access token")
+			errs.TokenError(w, errs.CodeServerError, errs.MsgServerError)
 			return
 		}
 		tok.AccessToken = accessJWT
@@ -107,36 +108,36 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 
 	// RFC 6749 Section 4.1.3: code parameter is required
 	if code == "" {
-		return nil, fmt.Errorf("code parameter is required")
+		return nil, fmt.Errorf(errs.MsgCodeParamRequired)
 	}
 
 	authCode, err := s.PopCode(code) // also deletes it (single-use)
 	if err != nil {
-		return nil, fmt.Errorf("invalid authorization code")
+		return nil, fmt.Errorf(errs.MsgInvalidAuthCode)
 	}
 	if time.Now().After(authCode.ExpiresAt) {
-		return nil, fmt.Errorf("authorization code expired")
+		return nil, fmt.Errorf(errs.MsgAuthCodeExpired)
 	}
 	if authCode.ClientID != clientID {
-		return nil, fmt.Errorf("code was not issued to this client")
+		return nil, fmt.Errorf(errs.MsgCodeClientMismatch)
 	}
 	if authCode.RedirectURI != redirectURI {
-		return nil, fmt.Errorf("redirect_uri mismatch")
+		return nil, fmt.Errorf(errs.MsgRedirectURIMismatch)
 	}
 	if authCode.CodeChallenge == "" {
-		return nil, fmt.Errorf("PKCE (code_challenge) is required per OAuth 2.1")
+		return nil, fmt.Errorf(errs.MsgPkceRequired)
 	}
 
 	if verifier == "" {
-		return nil, fmt.Errorf("code_verifier is required")
+		return nil, fmt.Errorf(errs.MsgCodeVerifierRequired)
 	}
 
 	if authCode.CodeChallengeMethod != "S256" {
-		return nil, fmt.Errorf("only S256 code_challenge_method is allowed")
+		return nil, fmt.Errorf(errs.MsgS256OnlyErrorMsg)
 	}
 
 	if !verifyPKCE(authCode.CodeChallenge, verifier) {
-		return nil, fmt.Errorf("code_verifier does not match code_challenge")
+		return nil, fmt.Errorf(errs.MsgVerifierMismatch)
 	}
 
 	tok := newToken(authCode.UserID, clientID, authCode.Scope)
@@ -147,16 +148,16 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (
 func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) {
 	refreshToken := r.FormValue("refresh_token")
 	if refreshToken == "" {
-		return nil, fmt.Errorf("refresh_token parameter is required")
+		return nil, fmt.Errorf(errs.MsgRefreshTokenParamRequired)
 	}
 
 	old, err := s.GetByRefreshToken(refreshToken)
 	if err != nil {
-		return nil, fmt.Errorf("invalid refresh token")
+		return nil, fmt.Errorf(errs.MsgInvalidRefreshToken)
 	}
 
 	if time.Now().After(old.ExpiresAt) {
-		return nil, fmt.Errorf("refresh token expired")
+		return nil, fmt.Errorf(errs.MsgRefreshTokenExpired)
 	}
 	//revoke old refresh token
 	s.RevokeRefreshToken(refreshToken)
@@ -212,15 +213,6 @@ func extractClientCredentials(r *http.Request) (id, secret string) {
 	return r.FormValue("client_id"), r.FormValue("client_secret")
 }
 
-func tokenError(w http.ResponseWriter, errCode, desc string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-	json.NewEncoder(w).Encode(map[string]string{
-		"error":             errCode,
-		"error_description": desc,
-	})
-}
-
 // verifyPKCE verifies code_verifier against code_challenge per RFC 7636
 func verifyPKCE(challenge, verifier string) bool {
 	h := sha256.Sum256([]byte(verifier))
@@ -235,7 +227,7 @@ func signIDToken(tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer 
 
 	user, err := s.GetUserByID(tok.UserID)
 	if err != nil {
-		return "", fmt.Errorf("user not found for id_token claims")
+		return "", fmt.Errorf(errs.MsgUserNotFoundForIDToken)
 	}
 
 	// Extract given_name from name

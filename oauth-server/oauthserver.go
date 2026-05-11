@@ -27,8 +27,9 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey, issuerURL))
+	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
+	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, publicKey))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
-	mux.Handle("/oauth/token/revocation", requireAuth(handlers.RevocationHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(publicKey))
 	// OpenID Connect discovery document
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +41,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 			TokenEndpoint                  string   `json:"token_endpoint"`
 			UserinfoEndpoint               string   `json:"userinfo_endpoint"`
 			TokenRevocationEndpoint        string   `json:"tokenrevocation_endpoint"`
+			TokenIntrospectionEndpoint     string   `json:"tokenintrospection_endpoint"`
 			JWKSURI                        string   `json:"jwks_uri"`
 			ScopesSupported                []string `json:"scopes_supported"`
 			ResponseTypesSupported         []string `json:"response_types_supported"`
@@ -54,6 +56,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 			TokenEndpoint:                  issuerURL + "/oauth/token",
 			UserinfoEndpoint:               issuerURL + "/userinfo",
 			TokenRevocationEndpoint:        issuerURL + "/oauth/token/revocation",
+			TokenIntrospectionEndpoint:     issuerURL + "/oauth/token/introspection",
 			JWKSURI:                        issuerURL + "/.well-known/jwks.json",
 			ScopesSupported:                []string{"openid", "profile", "email"},
 			ResponseTypesSupported:         []string{"code"},

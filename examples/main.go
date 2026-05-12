@@ -108,25 +108,7 @@ func (s *tokenStore) all() map[string]tokenRecord {
 	return out
 }
 
-type routeInfo struct {
-	Method      string
-	Path        string
-	Owner       string
-	Description string
-}
 
-type dashboardData struct {
-	User         *bettergoth.VerifiedUser
-	UserDetails  *tokenRecord
-	Routes       []routeInfo
-	CookieSecure bool
-}
-
-type homeData struct {
-	OAuthServerLoginPath string
-	GoogleLoginPath      string
-	SignupURL            string
-}
 
 func loadTemplates() (home *template.Template, dashboard *template.Template, err error) {
 	homePath := filepath.Join("templates", "home.html")
@@ -347,136 +329,12 @@ func main() {
 	})
 
 	// Home page (app-owned)
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		if err := homeTemplate.Execute(w, homeData{
-			OAuthServerLoginPath: providerLoginPath,
-			GoogleLoginPath:      googleLoginPath,
-			SignupURL:            signupURL,
-		}); err != nil {
-			http.Error(w, "failed to render home page", http.StatusInternalServerError)
-			return
-		}
-	})
+	mux.HandleFunc("GET /{$}", handleHome(homeTemplate, providerLoginPath, googleLoginPath, signupURL))
 
 	// Dashboard (app-owned, protected)
-	mux.Handle("GET /dashboard", authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := bettergoth.UserFromContext(r.Context())
-		if !ok {
-			http.Error(w, "missing user from context", http.StatusInternalServerError)
-			return
-		}
+	mux.Handle("GET /dashboard", handleDashboard(auth, store, dashboardTemplate, jwtCookieSecure))
 
-		var details *tokenRecord
-		if rec, found := store.getBySub(user.Subject); found {
-			details = &rec
-		}
-
-		data := dashboardData{
-			User:         user,
-			UserDetails:  details,
-			CookieSecure: jwtCookieSecure,
-			Routes: []routeInfo{
-				{
-					Method:      "GET",
-					Path:        "/help",
-					Owner:       "App",
-					Description: "RFC 9650 RDAP help endpoint - advertises authentication capabilities with 'farv1' support",
-				},
-				{
-					Method:      "GET",
-					Path:        "/",
-					Owner:       "App",
-					Description: "Homepage with login options",
-				},
-				{
-					Method:      "GET",
-					Path:        "/login/oauthserver",
-					Owner:       "Library (better-goth)",
-					Description: "Starts OAuth 2.0 authorization code flow against local oauth-server",
-				},
-				{
-					Method:      "GET",
-					Path:        "/callback/oauthserver",
-					Owner:       "Library + App hook",
-					Description: "OAuth callback - library validates, app handles result via AuthResultHandler",
-				},
-				{
-					Method:      "GET",
-					Path:        "/dashboard",
-					Owner:       "App",
-					Description: "Protected dashboard showing route ownership and user details (session cookie auth)",
-				},
-				{
-					Method:      "POST",
-					Path:        "/admin/rotate",
-					Owner:       "App",
-					Description: "Triggers oauth-server RSA key rotation through the protected app",
-				},
-				{
-					Method:      "GET",
-					Path:        "/api/resource",
-					Owner:       "App",
-					Description: "Protected resource endpoint using session cookie authentication (RFC 6750 via cookie)",
-				},
-				{
-					Method:      "GET",
-					Path:        "/api/resource/bearer",
-					Owner:       "App",
-					Description: "Protected resource endpoint using Bearer token (RFC 6750) from Authorization header",
-				},
-				{
-					Method:      "POST",
-					Path:        "/signout",
-					Owner:       "App",
-					Description: "Clears the JWT cookie and redirects to the homepage",
-				},
-				{
-					Method:      "POST",
-					Path:        "/v1/tokens/store",
-					Owner:       "App",
-					Description: "Stores a token record in the in-memory token store",
-				},
-				{
-					Method:      "GET",
-					Path:        "/v1/tokens",
-					Owner:       "App",
-					Description: "Returns all in-memory token records as JSON",
-				},
-				{
-					Method:      "GET",
-					Path:        "/v1/tokens/{sessionID}",
-					Owner:       "App",
-					Description: "Returns one in-memory token record by sessionID as JSON",
-				},
-				{
-					Method:      "PUT",
-					Path:        "/v1/tokens/{sessionID}",
-					Owner:       "App",
-					Description: "Updates one in-memory token record by sessionID",
-				},
-			},
-		}
-
-		if err := dashboardTemplate.Execute(w, data); err != nil {
-			http.Error(w, "failed to render dashboard", http.StatusInternalServerError)
-			return
-		}
-	})))
-
-	mux.Handle("GET /api/resource", authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := bettergoth.UserFromContext(r.Context())
-		if !ok {
-			http.Error(w, "missing user from context", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"sub":            user.Subject,
-			"message":        "protected resource access granted",
-			"authentication": "session cookie",
-		})
-	})))
+	mux.Handle("GET /api/resource", handleAPIResource(auth))
 
 	// RFC 6750: Bearer token endpoint - protected resource with Bearer token auth
 	mux.HandleFunc("GET /api/resource/bearer", func(w http.ResponseWriter, r *http.Request) {

@@ -1,19 +1,18 @@
 package handlers
 
 import (
-	"crypto/rsa"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func IntrospectionHandler(s *store.Store, pubKey *rsa.PublicKey) http.HandlerFunc {
+func IntrospectionHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
@@ -84,12 +83,7 @@ func IntrospectionHandler(s *store.Store, pubKey *rsa.PublicKey) http.HandlerFun
 			return
 		}
 
-		jwtToken, err := jwt.Parse(token, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %s", t.Header["alg"])
-			}
-			return pubKey, nil
-		}, jwt.WithValidMethods([]string{"RS256"}))
+		jwtToken, err := km.ParseJWT(token)
 
 		if err != nil || !jwtToken.Valid {
 			json.NewEncoder(w).Encode(res)

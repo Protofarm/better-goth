@@ -2,7 +2,6 @@ package oauthserver
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
@@ -11,26 +10,25 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, redirectURIs []string, devMode bool) (*http.ServeMux, error) {
-	privateKey, err := keys.LoadOrGenerate(keyFile)
-	if err != nil {
-		return nil, fmt.Errorf("RSA key: %v", err)
-	}
-	publicKey := &privateKey.PublicKey
+func CreateOAuthServer(port, issuerURL, keyDir, clientID, clientSecret string, redirectURIs []string, devMode bool) (*http.ServeMux, error) {
+	privateKM := keys.NewKeyManager(keyDir)
+
 	s := store.NewStore(store.Config{
 		DefaultClientID:     clientID,
 		DefaultClientSecret: clientSecret,
 		DefaultRedirectURIs: redirectURIs,
 		DevMode:             devMode,
 	})
-	requireAuth := middleware.RequireAuth(s, publicKey)
+	requireAuth := middleware.RequireAuth(s, privateKM)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode))
-	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey, issuerURL))
+	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, issuerURL))
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
-	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, publicKey))
+	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
-	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(publicKey))
+	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(privateKM))
+	// admin endpoints
+	mux.HandleFunc("/admin/rotate", handlers.RotateHandler(privateKM))
 	// OpenID Connect discovery document
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -42,6 +40,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 			UserinfoEndpoint               string   `json:"userinfo_endpoint"`
 			TokenRevocationEndpoint        string   `json:"tokenrevocation_endpoint"`
 			TokenIntrospectionEndpoint     string   `json:"tokenintrospection_endpoint"`
+			RotateKeyEndpoint              string   `json:"rotatekey_endpoint"`
 			JWKSURI                        string   `json:"jwks_uri"`
 			ScopesSupported                []string `json:"scopes_supported"`
 			ResponseTypesSupported         []string `json:"response_types_supported"`
@@ -57,6 +56,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 			UserinfoEndpoint:               issuerURL + "/userinfo",
 			TokenRevocationEndpoint:        issuerURL + "/oauth/token/revocation",
 			TokenIntrospectionEndpoint:     issuerURL + "/oauth/token/introspection",
+			RotateKeyEndpoint:              issuerURL + "/admin/rotate",
 			JWKSURI:                        issuerURL + "/.well-known/jwks.json",
 			ScopesSupported:                []string{"openid", "profile", "email"},
 			ResponseTypesSupported:         []string{"code"},

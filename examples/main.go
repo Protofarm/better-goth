@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -156,6 +157,27 @@ func splitCSV(input string) []string {
 	return out
 }
 
+func rotateOAuthServerKey(ctx context.Context, issuerURL string) (int, []byte, error) {
+	rotateURL := strings.TrimRight(issuerURL, "/") + "/admin/rotate"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rotateURL, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+
+	return resp.StatusCode, body, nil
+}
+
 func main() {
 	mux := http.NewServeMux()
 
@@ -182,7 +204,7 @@ func main() {
 	jwtCookieSecure = !devMode
 
 	oauthPort := normalizePort(envOrDefault("OAUTH_SERVER_PORT", "8080"))
-	keyFile := envOrDefault("OAUTH_SERVER_KEY_FILE", "private.pem")
+	keyDir := envOrDefault("OAUTH_SERVER_KEY_DIR", "keys")
 	defaultRedirectURI := fmt.Sprintf("%s://localhost:%s/callback/oauthserver", appScheme, appPort)
 	redirectURIs := splitCSV(envOrDefault("OAUTH_SERVER_REDIRECT_URIS", defaultRedirectURI))
 
@@ -190,7 +212,7 @@ func main() {
 	tlsKey := envOrDefault("OAUTH_SERVER_TLS_KEY", "")
 
 	// use default oauth server implementation, can be managed automatically
-	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyFile, oauthServerClientID, oauthServerClientSecret, redirectURIs, devMode)
+	oauthServer, err := oauthserver.CreateOAuthServer(oauthPort, oauthServerIssuer, keyDir, oauthServerClientID, oauthServerClientSecret, redirectURIs, devMode)
 	go func() {
 		listenAddr := ":" + oauthPort
 		log.Printf("OAuth 2.0 server listening on %s", listenAddr)
@@ -287,6 +309,18 @@ func main() {
 	}
 	bettergoth.RegisterRoutes(mux, auth)
 
+	mux.Handle("POST /admin/rotate", authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		status, body, err := rotateOAuthServerKey(r.Context(), oauthServerIssuer)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to rotate oauth-server key: %v", err), http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	})))
+
 	// RFC 9650: RDAP Help endpoint - advertise authentication support
 	mux.HandleFunc("GET /help", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -371,6 +405,12 @@ func main() {
 					Path:        "/dashboard",
 					Owner:       "App",
 					Description: "Protected dashboard showing route ownership and user details (session cookie auth)",
+				},
+				{
+					Method:      "POST",
+					Path:        "/admin/rotate",
+					Owner:       "App",
+					Description: "Triggers oauth-server RSA key rotation through the protected app",
 				},
 				{
 					Method:      "GET",

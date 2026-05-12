@@ -2,12 +2,11 @@ package middleware
 
 import (
 	"context"
-	"crypto/rsa"
-	"fmt"
 	"net/http"
 	"strings"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -19,7 +18,7 @@ const ClaimsKey contextKey = "jwt_claims"
 // RequireAuth returns an http.Handler middleware that validates a Bearer JWT
 // signed with the provided RSA public key. Claims are stored in the request
 // context under ClaimsKey and can be retrieved with ClaimsFromContext.
-func RequireAuth(s *store.Store, pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
+func RequireAuth(s *store.Store, km *keys.KeyManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -35,12 +34,7 @@ func RequireAuth(s *store.Store, pubKey *rsa.PublicKey) func(http.Handler) http.
 				return
 			}
 
-			token, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
-				if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
-					return nil, fmt.Errorf(errs.MsgUnexpectedSigningMethod, t.Header["alg"])
-				}
-				return pubKey, nil
-			}, jwt.WithValidMethods([]string{"RS256"}))
+			token, err := km.ParseJWT(raw)
 
 			if err != nil || !token.Valid {
 				errs.WriteError(w, http.StatusUnauthorized, errs.CodeInvalidToken, errs.ResourceErrorMessages[errs.CodeInvalidToken])

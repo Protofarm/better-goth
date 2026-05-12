@@ -81,6 +81,10 @@
     <button class="button" type="submit">Sign out</button>
   </form>
 
+  <form id="rotate-form" method="POST" action="/admin/rotate" style="margin: 0 0 1rem;">
+    <button class="button" type="submit">Rotate oauth-server key</button>
+  </form>
+
   <script>
     document.getElementById('signout-form').addEventListener('submit', async (e) => {
       e.preventDefault();

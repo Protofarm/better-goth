@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,11 +14,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) http.HandlerFunc {
+func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			errs.TokenError(w, errs.CodeMethodNotAllowed, errs.MsgOnlyPostAllowed)
@@ -67,8 +67,8 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 			errs.TokenError(w, errs.CodeInvalidGrant, err.Error())
 			return
 		}
-
-		accessJWT, err := signJWT(tok, privateKey, issuer)
+		privateKeyInfo := km.GetActiveKey()
+		accessJWT, err := signJWT(tok, privateKeyInfo, issuer)
 		if err != nil {
 			errs.TokenError(w, errs.CodeServerError, errs.MsgServerError)
 			return
@@ -85,7 +85,7 @@ func TokenHandler(s *store.Store, privateKey *rsa.PrivateKey, issuer string) htt
 		}
 
 		if strings.Contains(tok.Scope, "openid") || grantType == "authorization_code" {
-			if idToken, err := signIDToken(tok, s, privateKey, issuer); err == nil {
+			if idToken, err := signIDToken(tok, s, privateKeyInfo, issuer); err == nil {
 				resp["id_token"] = idToken
 			}
 		}
@@ -191,7 +191,7 @@ func newToken(userID, clientID, scope string) *models.Token {
 }
 
 // signJWT creates a signed RS256 JWT using the token metadata as claims.
-func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, error) {
+func signJWT(tok *models.Token, keyInfo keys.KeyInfo, issuer string) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"iss":       issuer,
@@ -202,7 +202,9 @@ func signJWT(tok *models.Token, key *rsa.PrivateKey, issuer string) (string, err
 		"scope":     tok.Scope,
 		"token_use": "access",
 	}
-	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = keyInfo.Kid
+	return token.SignedString(keyInfo.GetPrivateKey())
 }
 
 // extractClientCredentials supports both HTTP Basic Auth and form body.
@@ -222,7 +224,7 @@ func verifyPKCE(challenge, verifier string) bool {
 
 // signIDToken creates a signed RS256 JWT using the token metadata as OIDC claims,
 // including nonce (if provided) and at_hash (hash of access token).
-func signIDToken(tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer string) (string, error) {
+func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer string) (string, error) {
 	now := time.Now()
 
 	user, err := s.GetUserByID(tok.UserID)
@@ -266,5 +268,7 @@ func signIDToken(tok *models.Token, s *store.Store, key *rsa.PrivateKey, issuer 
 		claims["email_verified"] = true
 	}
 
-	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(key)
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = keyInfo.Kid
+	return token.SignedString(keyInfo.GetPrivateKey())
 }

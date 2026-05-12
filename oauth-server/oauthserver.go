@@ -23,7 +23,7 @@ func CreateOAuthServer(port, issuerURL, keyFile, clientID, clientSecret string, 
 		DefaultRedirectURIs: redirectURIs,
 		DevMode:             devMode,
 	})
-	requireAuth := middleware.RequireAuth(publicKey)
+	requireAuth := middleware.RequireAuth(s, publicKey)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKey, issuerURL))

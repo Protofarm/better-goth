@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	"github.com/Protofarm/better-goth/oauth-server/store"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -18,7 +19,7 @@ const ClaimsKey contextKey = "jwt_claims"
 // RequireAuth returns an http.Handler middleware that validates a Bearer JWT
 // signed with the provided RSA public key. Claims are stored in the request
 // context under ClaimsKey and can be retrieved with ClaimsFromContext.
-func RequireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
+func RequireAuth(s *store.Store, pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -27,6 +28,12 @@ func RequireAuth(pubKey *rsa.PublicKey) func(http.Handler) http.Handler {
 				return
 			}
 			raw := strings.TrimPrefix(authHeader, "Bearer ")
+
+			_, err := s.GetByAccessToken(raw)
+			if err != nil {
+				errs.WriteError(w, http.StatusUnauthorized, errs.CodeInvalidToken, errs.ResourceErrorMessages[errs.CodeInvalidToken])
+				return
+			}
 
 			token, err := jwt.Parse(raw, func(t *jwt.Token) (interface{}, error) {
 				if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {

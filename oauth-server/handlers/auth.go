@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"time"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
@@ -14,7 +13,12 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func AuthorizeHandler(s *store.Store, devMode bool) http.HandlerFunc {
+func AuthorizeHandler(s *store.Store, devMode bool, templatePath string) http.HandlerFunc {
+	if authPageTemplate == nil {
+		if err := InitAuthTemplate(templatePath); err != nil {
+			panic("failed to load auth template: " + err.Error())
+		}
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		clientID := q.Get("client_id")
@@ -182,13 +186,10 @@ type authPageData struct {
 
 var authPageTemplate *template.Template
 
-func init() {
-	templatePath := filepath.Join("oauth-server", "templates", "auth.html")
+func InitAuthTemplate(templatePath string) error {
 	var err error
 	authPageTemplate, err = template.ParseFiles(templatePath)
-	if err != nil {
-		panic("failed to load auth template: " + err.Error())
-	}
+	return err
 }
 
 func renderAuthPage(w http.ResponseWriter, data authPageData) {

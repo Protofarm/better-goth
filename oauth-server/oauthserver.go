@@ -3,6 +3,7 @@ package oauthserver
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/oauth-server/keys"
@@ -21,7 +22,8 @@ func CreateOAuthServer(port, issuerURL, keyDir, clientID, clientSecret string, r
 	})
 	requireAuth := middleware.RequireAuth(s, privateKM)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode))
+	authTemplatePath := filepath.Join(".", "templates", "auth.html")
+	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode, authTemplatePath))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, issuerURL))
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
 	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))

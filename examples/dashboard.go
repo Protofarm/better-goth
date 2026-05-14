@@ -125,7 +125,6 @@ func handleDashboard(auth *bettergoth.Auth, store *tokenStore, dashboardTemplate
 			Routes:       dashboardRoutes(),
 		}
 
-		// dashboardTemplate is *template.Template, need to execute it
 		tmpl := dashboardTemplate.(*template.Template)
 		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, "failed to render dashboard", http.StatusInternalServerError)

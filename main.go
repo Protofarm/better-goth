@@ -117,10 +117,10 @@ func (a *Auth) AddProvider(provider Provider) {
 	a.Providers[provider.Name()] = provider
 }
 
-func RegisterRoutes(mux *http.ServeMux, auth *Auth) {
+func RegisterRoutes(router RouteRegistrar, auth *Auth) {
 	println("Registering auth routes")
-	mux.HandleFunc("GET /login/{provider}", auth.authHandler)
-	mux.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
+	router.HandleFunc("GET /login/{provider}", auth.authHandler)
+	router.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
 }
 
 func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {

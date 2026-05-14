@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/oauth-server/keys"
@@ -11,20 +12,34 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func CreateOAuthServer(port, issuerURL, keyDir, clientID, clientSecret string, redirectURIs []string, devMode bool) (*http.ServeMux, error) {
-	privateKM := keys.NewKeyManager(keyDir)
+type ServerConfig struct {
+	Port         string
+	IssuerURL    string
+	KeyDir       string
+	ClientID     string
+	ClientSecret string
+	RedirectURIs []string
+	AuthHTMLPath string
+	DevMode      bool
+}
+
+func CreateOAuthServer(cfg ServerConfig) (*http.ServeMux, error) {
+	privateKM := keys.NewKeyManager(cfg.KeyDir)
 
 	s := store.NewStore(store.Config{
-		DefaultClientID:     clientID,
-		DefaultClientSecret: clientSecret,
-		DefaultRedirectURIs: redirectURIs,
-		DevMode:             devMode,
+		DefaultClientID:     cfg.ClientID,
+		DefaultClientSecret: cfg.ClientSecret,
+		DefaultRedirectURIs: cfg.RedirectURIs,
+		DevMode:             cfg.DevMode,
 	})
 	requireAuth := middleware.RequireAuth(s, privateKM)
 	mux := http.NewServeMux()
-	authTemplatePath := filepath.Join(".", "templates", "auth.html")
-	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, devMode, authTemplatePath))
-	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, issuerURL))
+	authTemplatePath := strings.TrimSpace(cfg.AuthHTMLPath)
+	if authTemplatePath == "" {
+		authTemplatePath = filepath.Join(".", "templates", "auth.html")
+	}
+	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, cfg.DevMode, authTemplatePath))
+	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, cfg.IssuerURL))
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
 	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
@@ -52,14 +67,14 @@ func CreateOAuthServer(port, issuerURL, keyDir, clientID, clientSecret string, r
 			SubjectTypesSupported          []string `json:"subject_types_supported"`
 			IDTokenSigningAlgValuesSupport []string `json:"id_token_signing_alg_values_supported"`
 		}{
-			Issuer:                         issuerURL,
-			AuthorizationEndpoint:          issuerURL + "/authorize",
-			TokenEndpoint:                  issuerURL + "/oauth/token",
-			UserinfoEndpoint:               issuerURL + "/userinfo",
-			TokenRevocationEndpoint:        issuerURL + "/oauth/token/revocation",
-			TokenIntrospectionEndpoint:     issuerURL + "/oauth/token/introspection",
-			RotateKeyEndpoint:              issuerURL + "/admin/rotate",
-			JWKSURI:                        issuerURL + "/.well-known/jwks.json",
+			Issuer:                         cfg.IssuerURL,
+			AuthorizationEndpoint:          cfg.IssuerURL + "/authorize",
+			TokenEndpoint:                  cfg.IssuerURL + "/oauth/token",
+			UserinfoEndpoint:               cfg.IssuerURL + "/userinfo",
+			TokenRevocationEndpoint:        cfg.IssuerURL + "/oauth/token/revocation",
+			TokenIntrospectionEndpoint:     cfg.IssuerURL + "/oauth/token/introspection",
+			RotateKeyEndpoint:              cfg.IssuerURL + "/admin/rotate",
+			JWKSURI:                        cfg.IssuerURL + "/.well-known/jwks.json",
 			ScopesSupported:                []string{"openid", "profile", "email"},
 			ResponseTypesSupported:         []string{"code"},
 			GrantTypesSupported:            []string{"authorization_code", "refresh_token", "client_credentials"},

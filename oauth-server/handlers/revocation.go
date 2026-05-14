@@ -10,31 +10,31 @@ import (
 func RevocationHandler(s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			errs.HTTPError(w, errs.JSONErrRevocationMethodNotAllowed, http.StatusMethodNotAllowed)
+			errs.HTTPError(w, errs.JSONErrMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 
 		// RFC 7009 Section 2.1: The client also includes its authentication credentials
 		clientID, clientSecret := extractClientCredentials(r)
 		if clientID == "" {
-			errs.HTTPError(w, errs.JSONErrRevocationInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		client, err := s.GetClient(clientID)
 		if err != nil || client.ClientSecret != clientSecret {
-			errs.HTTPError(w, errs.JSONErrRevocationInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		if err := r.ParseForm(); err != nil {
-			errs.HTTPError(w, errs.JSONErrRevocationInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		token := r.Form.Get("token")
 		if token == "" {
-			errs.HTTPError(w, errs.JSONErrRevocationInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 

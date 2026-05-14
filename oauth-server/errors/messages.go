@@ -25,11 +25,11 @@ const (
 
 // Token endpoint error messages
 const (
-	MsgOnlyPostAllowed      = "only POST method is allowed"
-	MsgCouldNotParseForm    = "could not parse form body"
-	MsgGrantTypeRequired    = "grant_type parameter is required"
-	MsgClientIDRequired     = "client_id is required"
-	MsgClientAuthFailed     = "client authentication failed"
+	MsgOnlyPostAllowed       = "only POST method is allowed"
+	MsgCouldNotParseForm     = "could not parse form body"
+	MsgGrantTypeRequired     = "grant_type parameter is required"
+	MsgClientIDRequired      = "client_id is required"
+	MsgClientAuthFailed      = "client authentication failed"
 	MsgGrantTypeNotSupported = "grant_type is not supported"
 )
 
@@ -43,11 +43,11 @@ const (
 
 // Authorization code error messages
 const (
-	MsgCodeParamRequired      = "code parameter is required"
-	MsgInvalidAuthCode        = "invalid authorization code"
-	MsgAuthCodeExpired        = "authorization code expired"
-	MsgCodeClientMismatch     = "code was not issued to this client"
-	MsgRedirectURIMismatch    = "redirect_uri mismatch"
+	MsgCodeParamRequired   = "code parameter is required"
+	MsgInvalidAuthCode     = "invalid authorization code"
+	MsgAuthCodeExpired     = "authorization code expired"
+	MsgCodeClientMismatch  = "code was not issued to this client"
+	MsgRedirectURIMismatch = "redirect_uri mismatch"
 )
 
 // Refresh token error messages
@@ -59,7 +59,7 @@ const (
 
 // Resource server error messages
 const (
-	MsgMissingToken      = "Authorization header must be Bearer <token>"
+	MsgMissingToken          = "Authorization header must be Bearer <token>"
 	MsgTokenValidationFailed = "Token validation failed"
 )
 
@@ -78,8 +78,8 @@ const (
 
 // Generic error messages
 const (
-	MsgServerError     = "server error occurred"
-	MsgInvalidRequest  = "invalid request parameters"
+	MsgServerError      = "server error occurred"
+	MsgInvalidRequest   = "invalid request parameters"
 	MsgMethodNotAllowed = "method not allowed"
 )
 
@@ -108,26 +108,19 @@ var ResourceErrorMessages = map[string]string{
 	CodeInvalidToken: MsgTokenValidationFailed,
 }
 
+// Generic JSON error responses
+const (
+	JSONErrInternalServer   = `{"error":"internal_server_error"}`
+	JSONErrMethodNotAllowed = `{"error":"method_not_allowed"}`
+	JSONErrInvalidRequest   = `{"error":"invalid_request"}`
+)
+
 // JSON error responses for authorization endpoint
 const (
 	JSONErrUnsupportedResponseType = `{"error":"unsupported_response_type","error_description":"response_type must be 'code'"}`
 	JSONErrInvalidClient           = `{"error":"invalid_client","error_description":"client_id is invalid or missing"}`
 	JSONErrInvalidRedirectURI      = `{"error":"invalid_redirect_uri","error_description":"redirect_uri is not registered"}`
-	JSONErrMethodNotAllowed        = `{"error":"method_not_allowed"}`
-	JSONErrInvalidRequest          = `{"error":"invalid_request"}`
 	JSONErrUnauthorized            = `{"error":"unauthorized"}`
 	JSONErrInvalidToken            = `{"error":"invalid_token"}`
 	JSONErrUserNotFound            = `{"error":"user_not_found"}`
-)
-
-// Introspection endpoint error JSON responses
-const (
-	JSONErrIntrospectionMethodNotAllowed = `{"error":"method_not_allowed"}`
-	JSONErrIntrospectionInvalidRequest   = `{"error":"invalid_request"}`
-)
-
-// Revocation endpoint error JSON responses
-const (
-	JSONErrRevocationMethodNotAllowed = `{"error":"method_not_allowed"}`
-	JSONErrRevocationInvalidRequest   = `{"error":"invalid_request"}`
 )

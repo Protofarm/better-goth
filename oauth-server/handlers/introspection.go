@@ -16,31 +16,31 @@ func IntrospectionHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
-			errs.HTTPError(w, errs.JSONErrIntrospectionMethodNotAllowed, http.StatusMethodNotAllowed)
+			errs.HTTPError(w, errs.JSONErrMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 
 		// RFC 7662 Section 2.1: client authentication is required for introspection.
 		clientID, clientSecret := extractClientCredentials(r)
 		if clientID == "" {
-			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		client, err := s.GetClient(clientID)
 		if err != nil || client.ClientSecret != clientSecret {
-			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		if err := r.ParseForm(); err != nil {
-			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 
 		token := r.Form.Get("token")
 		if token == "" {
-			errs.HTTPError(w, errs.JSONErrIntrospectionInvalidRequest, http.StatusBadRequest)
+			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 			return
 		}
 

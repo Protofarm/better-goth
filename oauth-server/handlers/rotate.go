@@ -12,23 +12,12 @@ import (
 func RotateHandler(km *keys.KeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Allow", http.MethodPost)
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			_ = json.NewEncoder(w).Encode(errs.NewErrorResponse(
-				errs.CodeMethodNotAllowed,
-				errs.MsgOnlyPostAllowed,
-			))
+			errs.HTTPError(w, errs.JSONErrMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 
 		if err := km.Rotate(); err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			_ = json.NewEncoder(w).Encode(errs.NewErrorResponse(
-				errs.CodeServerError,
-				err.Error(),
-			))
+			errs.HTTPError(w, errs.JSONErrInternalServer, http.StatusInternalServerError)
 			return
 		}
 

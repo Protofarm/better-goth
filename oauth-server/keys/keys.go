@@ -33,6 +33,8 @@ type KeyManager struct {
 	dir       string
 }
 
+const oldKeyTTL = 30 * 24 * time.Hour
+
 func generateKid(version int) string {
 	date := time.Now().Format("2006-01-02")
 	return fmt.Sprintf("v%d-%s", version, date)
@@ -119,6 +121,7 @@ func (km *KeyManager) setup(dir string) {
 		}
 	}
 	km.activeKid = latest
+	km.pruneExpiredKeysLocked(time.Now())
 }
 
 func (km *KeyManager) GetKeyInfos() []KeyInfo {
@@ -187,8 +190,31 @@ func (km *KeyManager) Rotate() error {
 
 	km.keys[kid] = privKey
 	km.activeKid = kid
+	km.pruneExpiredKeysLocked(time.Now())
 
 	return nil
 }
 
-// TODO: add TTL for old keys
+func (km *KeyManager) pruneExpiredKeysLocked(now time.Time) {
+	cutoff := now.Add(-oldKeyTTL)
+
+	for kid := range km.keys {
+		if kid == km.activeKid {
+			continue
+		}
+
+		keyPath := getKeyPath(km.dir, kid)
+		info, err := os.Stat(keyPath)
+		if err != nil {
+			continue
+		}
+		if !info.ModTime().Before(cutoff) {
+			continue
+		}
+
+		delete(km.keys, kid)
+		if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("failed to remove expired key %s: %v", kid, err)
+		}
+	}
+}

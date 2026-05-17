@@ -14,5 +14,5 @@ require (
 
 require (
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.4
 )

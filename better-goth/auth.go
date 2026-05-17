@@ -20,7 +20,13 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const minJWTSecretBytes = 32
+const (
+	minJWTSecretBytes       = 32
+	oauthStateCookieName    = "oauth_state"
+	oauthVerifierCookieName = "oauth_code_verifier"
+	oauthNonceCookieName    = "oauth_nonce"
+	authFlowCookieMaxAge    = 300
+)
 
 var (
 	ErrMissingJWTSecret = errors.New("jwt secret is required")
@@ -117,10 +123,17 @@ func (a *Auth) AddProvider(provider Provider) {
 	a.Providers[provider.Name()] = provider
 }
 
+func (a *Auth) LoginHandler() func(http.ResponseWriter, *http.Request) {
+	return a.authHandler
+}
+
+func (a *Auth) CallbackHandler() func(http.ResponseWriter, *http.Request) {
+	return a.callbackHandler
+}
+
 func RegisterRoutes(router RouteRegistrar, auth *Auth) {
-	println("Registering auth routes")
-	router.HandleFunc("GET /login/{provider}", auth.authHandler)
-	router.HandleFunc("GET /callback/{provider}", auth.callbackHandler)
+	router.HandleFunc("GET /login/{provider}", auth.LoginHandler())
+	router.HandleFunc("GET /callback/{provider}", auth.CallbackHandler())
 }
 
 func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
@@ -155,37 +168,10 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store state, verifier and nonce in secure cookies
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_state",
-		Value:    state,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   a.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-	})
+	a.setFlowCookie(w, oauthStateCookieName, state, 0)
+	a.setFlowCookie(w, oauthVerifierCookieName, codeVerifier, authFlowCookieMaxAge)
+	a.setFlowCookie(w, oauthNonceCookieName, nonce, authFlowCookieMaxAge)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_code_verifier",
-		Value:    codeVerifier,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   a.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   300,
-	})
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "oauth_nonce",
-		Value:    nonce,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   a.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   300,
-	})
-
-	// REPLACE authURL generation:
 	authURL := provider.Config().AuthCodeURL(state,
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
@@ -230,7 +216,7 @@ func exchangeWithPKCE(ctx context.Context, cfg *oauth2.Config, code, codeVerifie
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "golang/oauth2")
 
-	resp, err := (&http.Client{}).Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +265,22 @@ func generateState() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
+func (a *Auth) setFlowCookie(w http.ResponseWriter, name, value string, maxAge int) {
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   a.CookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	}
+	if maxAge > 0 {
+		cookie.MaxAge = maxAge
+	}
+
+	http.SetCookie(w, cookie)
+}
+
 func (a *Auth) signJWT(subject string, expiresAt time.Time) (string, error) {
 	if len(a.jwtSecret) == 0 {
 		return "", ErrMissingJWTSecret
@@ -294,105 +296,32 @@ func (a *Auth) signJWT(subject string, expiresAt time.Time) (string, error) {
 }
 
 func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
-	providerName := r.PathValue("provider")
-	if providerName == "" {
-		http.Error(w, "provider is required; use /callback/{provider}", http.StatusBadRequest)
-		return
-	}
-
-	provider, ok := a.Providers[providerName]
+	providerName, provider, ok := a.resolveCallbackProvider(w, r)
 	if !ok {
-		http.NotFound(w, r)
 		return
 	}
 
-	state := r.URL.Query().Get("state")
-	code := r.URL.Query().Get("code")
-
-	if code == "" {
-		http.Error(w, "missing code", http.StatusBadRequest)
-		return
-	}
-
-	cookie, err := r.Cookie("oauth_state")
-	if err != nil {
-		http.Error(w, "state cookie missing", http.StatusBadRequest)
-		return
-	}
-
-	if state != cookie.Value {
-		http.Error(w, "invalid oauth state", http.StatusBadRequest)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:   "oauth_state",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
-
-	// Retrieve code_verifier from cookie for PKCE validation
-	verifierCookie, err := r.Cookie("oauth_code_verifier")
-	if err != nil {
-		http.Error(w, "code_verifier cookie missing", http.StatusBadRequest)
-		return
-	}
-	codeVerifier := verifierCookie.Value
-
-	// OAuth 2.1: Exchange code with PKCE code_verifier parameter
-	token, err := exchangeWithPKCE(r.Context(), provider.Config(), code, codeVerifier)
-	if err != nil {
-		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Clear code_verifier cookie after successful exchange
-	http.SetCookie(w, &http.Cookie{
-		Name:   "oauth_code_verifier",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
-
-	rawIDToken, ok := token.Extra("id_token").(string)
+	state, code, ok := parseCallbackRequest(w, r)
 	if !ok {
-		http.Error(w, "no id_token field", http.StatusInternalServerError)
 		return
 	}
 
-	idToken, err := provider.Verifier().Verify(r.Context(), rawIDToken)
-	if err != nil {
-		http.Error(w, "failed to verify id_token", http.StatusInternalServerError)
+	if !validateCallbackState(w, r, state) {
 		return
 	}
 
-	var claims map[string]interface{}
-	if err := idToken.Claims(&claims); err != nil {
-		http.Error(w, "failed to parse claims", http.StatusInternalServerError)
+	token, ok := exchangeCallbackToken(w, r, provider, code)
+	if !ok {
 		return
 	}
 
-	subject, ok := claims["sub"].(string)
-	if !ok || subject == "" {
-		http.Error(w, "missing subject claim", http.StatusInternalServerError)
+	rawIDToken, claims, subject, ok := verifyCallbackIdentity(w, r, provider, token)
+	if !ok {
 		return
 	}
 
-	// OpenID Connect: Validate nonce to prevent token replay attacks (OAuth 2.1)
-	if nonceCookie, err := r.Cookie("oauth_nonce"); err == nil {
-		claimNonce, ok := claims["nonce"].(string)
-		if !ok || claimNonce != nonceCookie.Value {
-			http.Error(w, "nonce mismatch - possible replay attack", http.StatusBadRequest)
-			return
-		}
-		// Clear nonce cookie after validation
-		http.SetCookie(w, &http.Cookie{
-			Name:   "oauth_nonce",
-			Value:  "",
-			Path:   "/",
-			MaxAge: -1,
-		})
+	if !validateNonceClaim(w, r, claims) {
+		return
 	}
 
 	signedToken, err := a.signJWT(subject, token.Expiry)
@@ -401,46 +330,15 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if nonceCookie, err := r.Cookie("oauth_nonce"); err == nil {
-		claimNonce, ok := claims["nonce"].(string)
-		if !ok || claimNonce != nonceCookie.Value {
-			http.Error(w, "nonce mismatch - possible replay attack", http.StatusBadRequest)
-			return
-		}
-		// Clear nonce cookie after validation
-		http.SetCookie(w, &http.Cookie{
-			Name:   "oauth_nonce",
-			Value:  "",
-			Path:   "/",
-			MaxAge: -1,
-		})
-	}
-	u := &pb.User{
-		Picture:       claims["picture"].(string),
-		Iat:           claims["iat"].(float64),
-		Exp:           claims["exp"].(float64),
-		Iss:           claims["iss"].(string),
-		Azp:           claims["azp"].(string),
-		EmailVerified: claims["email_verified"].(bool),
-		Name:          claims["name"].(string),
-		GivenName:     claims["given_name"].(string),
-		Aud:           claims["aud"].(string),
-		Sub:           subject,
-		Email:         claims["email"].(string),
-		AtHash:        claims["at_hash"].(string),
-		Jwt:           signedToken,
+	user := buildUserFromClaims(claims, subject, signedToken)
+	if err := a.handleAuthenticatedUser(r.Context(), user); err != nil {
+		http.Error(w, "failed to handle user", http.StatusInternalServerError)
+		return
 	}
 
-	if a.userHandler != nil {
-		if err := a.userHandler.HandleUser(r.Context(), u); err != nil {
-			http.Error(w, "failed to handle user", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	result := &AuthResult{
+	a.writeAuthResult(w, r, &AuthResult{
 		Provider:     providerName,
-		User:         u,
+		User:         user,
 		SignedToken:  signedToken,
 		OAuthToken:   token,
 		IDToken:      rawIDToken,
@@ -449,16 +347,205 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		RefreshToken: token.RefreshToken,
 		TokenType:    token.TokenType,
 		ExpiresAt:    token.Expiry,
+	})
+}
+
+func (a *Auth) resolveCallbackProvider(w http.ResponseWriter, r *http.Request) (string, Provider, bool) {
+	providerName := r.PathValue("provider")
+	if providerName == "" {
+		http.Error(w, "provider is required; use /callback/{provider}", http.StatusBadRequest)
+		return "", nil, false
 	}
 
+	provider, ok := a.Providers[providerName]
+	if !ok {
+		http.NotFound(w, r)
+		return "", nil, false
+	}
+
+	return providerName, provider, true
+}
+
+func parseCallbackRequest(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		http.Error(w, "missing code", http.StatusBadRequest)
+		return "", "", false
+	}
+
+	return state, code, true
+}
+
+func validateCallbackState(w http.ResponseWriter, r *http.Request, state string) bool {
+	cookie, err := r.Cookie(oauthStateCookieName)
+	if err != nil {
+		http.Error(w, "state cookie missing", http.StatusBadRequest)
+		return false
+	}
+	if state != cookie.Value {
+		http.Error(w, "invalid oauth state", http.StatusBadRequest)
+		return false
+	}
+
+	clearCookie(w, oauthStateCookieName)
+	return true
+}
+
+func exchangeCallbackToken(w http.ResponseWriter, r *http.Request, provider Provider, code string) (*oauth2.Token, bool) {
+	verifierCookie, err := r.Cookie(oauthVerifierCookieName)
+	if err != nil {
+		http.Error(w, "code_verifier cookie missing", http.StatusBadRequest)
+		return nil, false
+	}
+
+	token, err := exchangeWithPKCE(r.Context(), provider.Config(), code, verifierCookie.Value)
+	if err != nil {
+		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+		return nil, false
+	}
+
+	clearCookie(w, oauthVerifierCookieName)
+	return token, true
+}
+
+func verifyCallbackIdentity(w http.ResponseWriter, r *http.Request, provider Provider, token *oauth2.Token) (string, map[string]interface{}, string, bool) {
+	rawIDToken, ok := token.Extra("id_token").(string)
+	if !ok {
+		http.Error(w, "no id_token field", http.StatusInternalServerError)
+		return "", nil, "", false
+	}
+
+	idToken, err := provider.Verifier().Verify(r.Context(), rawIDToken)
+	if err != nil {
+		http.Error(w, "failed to verify id_token", http.StatusInternalServerError)
+		return "", nil, "", false
+	}
+
+	var claims map[string]interface{}
+	if err := idToken.Claims(&claims); err != nil {
+		http.Error(w, "failed to parse claims", http.StatusInternalServerError)
+		return "", nil, "", false
+	}
+
+	subject := claimString(claims, "sub")
+	if subject == "" {
+		http.Error(w, "missing subject claim", http.StatusInternalServerError)
+		return "", nil, "", false
+	}
+
+	return rawIDToken, claims, subject, true
+}
+
+func validateNonceClaim(w http.ResponseWriter, r *http.Request, claims map[string]interface{}) bool {
+	nonceCookie, err := r.Cookie(oauthNonceCookieName)
+	if err != nil {
+		return true
+	}
+
+	if claimString(claims, "nonce") != nonceCookie.Value {
+		http.Error(w, "nonce mismatch - possible replay attack", http.StatusBadRequest)
+		return false
+	}
+
+	clearCookie(w, oauthNonceCookieName)
+	return true
+}
+
+func buildUserFromClaims(claims map[string]interface{}, subject, signedToken string) *pb.User {
+	return &pb.User{
+		Picture:       claimString(claims, "picture"),
+		Iat:           claimFloat64(claims, "iat"),
+		Exp:           claimFloat64(claims, "exp"),
+		Iss:           claimString(claims, "iss"),
+		Azp:           claimString(claims, "azp"),
+		EmailVerified: claimBool(claims, "email_verified"),
+		Name:          claimString(claims, "name"),
+		GivenName:     claimString(claims, "given_name"),
+		Aud:           claimAudience(claims),
+		Sub:           subject,
+		Email:         claimString(claims, "email"),
+		AtHash:        claimString(claims, "at_hash"),
+		Jwt:           signedToken,
+	}
+}
+
+func (a *Auth) handleAuthenticatedUser(ctx context.Context, user *pb.User) error {
+	if a.userHandler == nil {
+		return nil
+	}
+
+	return a.userHandler.HandleUser(ctx, user)
+}
+
+func (a *Auth) writeAuthResult(w http.ResponseWriter, r *http.Request, result *AuthResult) {
 	if a.authResultHandler != nil {
 		if err := a.authResultHandler.HandleAuthResult(r.Context(), w, r, result); err != nil {
 			http.Error(w, "failed to handle auth result", http.StatusInternalServerError)
-			return
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte(signedToken))
+	_, _ = w.Write([]byte(result.SignedToken))
+}
+
+func clearCookie(w http.ResponseWriter, name string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:   name,
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+}
+
+func claimString(claims map[string]interface{}, key string) string {
+	value, ok := claims[key]
+	if !ok {
+		return ""
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case []string:
+		if len(v) > 0 {
+			return v[0]
+		}
+	case []interface{}:
+		if len(v) > 0 {
+			if item, ok := v[0].(string); ok {
+				return item
+			}
+		}
+	}
+
+	return ""
+}
+
+func claimFloat64(claims map[string]interface{}, key string) float64 {
+	value, ok := claims[key]
+	if !ok {
+		return 0
+	}
+
+	if floatValue, ok := value.(float64); ok {
+		return floatValue
+	}
+
+	return 0
+}
+
+func claimBool(claims map[string]interface{}, key string) bool {
+	value, ok := claims[key]
+	if !ok {
+		return false
+	}
+
+	boolValue, ok := value.(bool)
+	return ok && boolValue
+}
+
+func claimAudience(claims map[string]interface{}) string {
+	return claimString(claims, "aud")
 }

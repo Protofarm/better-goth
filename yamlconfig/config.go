@@ -4,6 +4,15 @@ import (
 	"go.yaml.in/yaml/v4"
 )
 
+type ProviderConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	RedirectURI  string `yaml:"redirect_uri"`
+	AuthURL      string `yaml:"auth_url,omitempty"`
+	TokenURL     string `yaml:"token_url,omitempty"`
+}
+
 type Config struct {
 	App struct {
 		Port         string `yaml:"port"`
@@ -34,11 +43,7 @@ type Config struct {
 			ClientSecret string `yaml:"client_secret"`
 			RedirectURI  string `yaml:"redirect_uri"`
 		} `yaml:"google"`
-		GitHub struct {
-			Enabled      bool   `yaml:"enabled"`
-			ClientID     string `yaml:"client_id"`
-			ClientSecret string `yaml:"client_secret"`
-		} `yaml:"github"`
+		External map[string]ProviderConfig `yaml:",inline"`
 	} `yaml:"providers"`
 
 	JWT struct {
@@ -50,11 +55,6 @@ type Config struct {
 		Type             string `yaml:"type"`
 		ConnectionString string `yaml:"connection_string"`
 	} `yaml:"storage"`
-
-	Templates struct {
-		Path    string `yaml:"path"`
-		Preload bool   `yaml:"preload"`
-	} `yaml:"templates"`
 
 	Logging struct {
 		Level  string `yaml:"level"`

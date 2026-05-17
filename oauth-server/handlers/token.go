@@ -30,75 +30,117 @@ func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.Handl
 			return
 		}
 
-		grantType := r.FormValue("grant_type")
-		if grantType == "" {
-			errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgGrantTypeRequired)
+		grantType, ok := parseGrantType(w, r)
+		if !ok {
 			return
 		}
 
-		clientID, clientSecret := extractClientCredentials(r)
-		if clientID == "" {
-			errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgClientIDRequired)
+		clientID, ok := authenticateTokenClient(w, r, s)
+		if !ok {
 			return
 		}
 
-		client, err := s.GetClient(clientID)
-		if err != nil || client.ClientSecret != clientSecret {
-			w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
-			errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
-			return
-		}
-
-		var tok *models.Token
-
-		switch grantType {
-		case "authorization_code":
-			tok, err = handleAuthorizationCode(s, r, clientID)
-		case "refresh_token":
-			tok, err = handleRefreshToken(s, r)
-		case "client_credentials":
-			tok, err = handleClientCredentials(clientID)
-		default:
-			errs.TokenError(w, errs.CodeUnsupportedGrantType, fmt.Sprintf("grant_type %q is not supported", grantType))
-			return
-		}
-
+		tok, errCode, err := issueTokenForGrant(s, r, grantType, clientID)
 		if err != nil {
-			errs.TokenError(w, errs.CodeInvalidGrant, err.Error())
+			errs.TokenError(w, errCode, err.Error())
 			return
 		}
+
 		privateKeyInfo := km.GetActiveKey()
-		accessJWT, err := signJWT(tok, privateKeyInfo, issuer)
-		if err != nil {
+		if err := signAndStoreToken(s, tok, privateKeyInfo, issuer); err != nil {
 			errs.TokenError(w, errs.CodeServerError, errs.MsgServerError)
 			return
 		}
-		tok.AccessToken = accessJWT
-		s.SaveToken(tok)
 
-		resp := map[string]interface{}{
-			"access_token":  tok.AccessToken,
-			"token_type":    "Bearer",
-			"expires_in":    tok.ExpiresIn,
-			"refresh_token": tok.RefreshToken,
-			"scope":         tok.Scope,
-		}
-
-		if strings.Contains(tok.Scope, "openid") || grantType == "authorization_code" {
-			if idToken, err := signIDToken(tok, s, privateKeyInfo, issuer); err == nil {
-				resp["id_token"] = idToken
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store, must-revalidate")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		json.NewEncoder(w).Encode(resp)
+		writeTokenResponse(w, s, tok, privateKeyInfo, issuer, grantType)
 	}
+}
+
+func parseGrantType(w http.ResponseWriter, r *http.Request) (string, bool) {
+	grantType := r.FormValue("grant_type")
+	if grantType == "" {
+		errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgGrantTypeRequired)
+		return "", false
+	}
+
+	return grantType, true
+}
+
+func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store) (string, bool) {
+	clientID, clientSecret := extractClientCredentials(r)
+	if clientID == "" {
+		errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgClientIDRequired)
+		return "", false
+	}
+
+	client, err := s.GetClient(clientID)
+	if err != nil || client.ClientSecret != clientSecret {
+		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
+		errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
+		return "", false
+	}
+
+	return clientID, true
+}
+
+func issueTokenForGrant(s *store.Store, r *http.Request, grantType, clientID string) (*models.Token, string, error) {
+	switch grantType {
+	case "authorization_code":
+		tok, err := handleAuthorizationCode(s, r, clientID)
+		return tok, errs.CodeInvalidGrant, err
+	case "refresh_token":
+		tok, err := handleRefreshToken(s, r)
+		return tok, errs.CodeInvalidGrant, err
+	case "client_credentials":
+		tok, err := handleClientCredentials(clientID)
+		return tok, errs.CodeInvalidGrant, err
+	default:
+		return nil, errs.CodeUnsupportedGrantType, fmt.Errorf("grant_type %q is not supported", grantType)
+	}
+}
+
+func signAndStoreToken(s *store.Store, tok *models.Token, keyInfo keys.KeyInfo, issuer string) error {
+	accessJWT, err := signJWT(tok, keyInfo, issuer)
+	if err != nil {
+		return err
+	}
+
+	tok.AccessToken = accessJWT
+	s.SaveToken(tok)
+	return nil
+}
+
+func writeTokenResponse(w http.ResponseWriter, s *store.Store, tok *models.Token, keyInfo keys.KeyInfo, issuer, grantType string) {
+	resp := map[string]interface{}{
+		"access_token":  tok.AccessToken,
+		"token_type":    "Bearer",
+		"expires_in":    tok.ExpiresIn,
+		"refresh_token": tok.RefreshToken,
+		"scope":         tok.Scope,
+	}
+
+	if shouldIncludeIDToken(tok, grantType) {
+		if idToken, err := signIDToken(tok, s, keyInfo, issuer); err == nil {
+			resp["id_token"] = idToken
+		}
+	}
+
+	writeTokenResponseHeaders(w)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func shouldIncludeIDToken(tok *models.Token, grantType string) bool {
+	return strings.Contains(tok.Scope, "openid") || grantType == "authorization_code"
+}
+
+func writeTokenResponseHeaders(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("X-XSS-Protection", "1; mode=block")
 }
 
 func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (*models.Token, error) {

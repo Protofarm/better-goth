@@ -20,129 +20,203 @@ func AuthorizeHandler(s *store.Store, devMode bool, templatePath string) http.Ha
 		}
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		clientID := q.Get("client_id")
-		redirectURI := q.Get("redirect_uri")
-		state := q.Get("state")
-		scope := q.Get("scope")
-		responseType := q.Get("response_type")
-		nonce := q.Get("nonce")
-		codeChallenge := q.Get("code_challenge")
-		codeChallengeMethod := q.Get("code_challenge_method")
-
-		// RFC 6749 Section 3.1.1: response_type is required
-		if responseType != "code" {
-			// Cannot redirect without valid redirect_uri, so return direct error
-			errs.HTTPError(w, errs.JSONErrUnsupportedResponseType, http.StatusBadRequest)
+		req := readAuthorizeRequest(r)
+		if !validateAuthorizeRequest(w, r, s, req, devMode) {
 			return
 		}
 
-		// RFC 6749 Section 3.1.1: client_id is required
-		client, err := s.GetClient(clientID)
-		if err != nil {
-			errs.HTTPError(w, errs.JSONErrInvalidClient, http.StatusBadRequest)
+		if r.Method != http.MethodPost {
+			renderAuthorizePage(w, req, authFormState{})
 			return
 		}
 
-		// RFC 6749 Section 3.1.2.1: redirect_uri must be registered
-		if !isValidRedirect(client.RedirectURIs, redirectURI, devMode) {
-			errs.HTTPError(w, errs.JSONErrInvalidRedirectURI, http.StatusBadRequest)
-			return
-		}
-
-		// RFC 6749 Section 3.1.1: state is required (best practice, enforced here)
-		if state == "" {
-			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest, errs.MsgStateRequired, "")
-			return
-		}
-		if codeChallenge == "" {
-			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest,
-				errs.MsgCodeChallengeRequired, state)
-			return
-		}
-
-		if codeChallengeMethod != "S256" {
-			errs.RedirectError(w, r, redirectURI, errs.CodeInvalidRequest,
-				errs.MsgOnlyS256Allowed, state)
-			return
-		}
-
-		if r.Method == http.MethodPost {
-			if err := r.ParseForm(); err != nil {
-				http.Error(w, "bad request", http.StatusBadRequest)
-				return
-			}
-
-			var (
-				user *models.User
-				err  error
-				msg  string
-			)
-
-			if signupUsername := r.FormValue("signup_username"); signupUsername != "" {
-				user = &models.User{Username: signupUsername, Email: r.FormValue("signup_email"), Name: r.FormValue("signup_name"), Password: r.FormValue("signup_password")}
-				err = s.CreateUser(user)
-				msg = "Username or email already taken."
-
-			} else {
-				user, err = s.GetUserByCredentials(
-					r.FormValue("username"),
-					r.FormValue("password"),
-				)
-				msg = "Invalid username or password."
-			}
-			if err != nil {
-				renderAuthPage(w, authPageData{
-					Title:               "Sign in to continue",
-					ErrorMessage:        msg,
-					ClientID:            clientID,
-					RedirectURI:         redirectURI,
-					State:               state,
-					Scope:               scope,
-					Nonce:               nonce,
-					CodeChallenge:       codeChallenge,
-					CodeChallengeMethod: codeChallengeMethod,
-				})
-				return
-			}
-
-			// Generate single-use auth code
-			b := make([]byte, 16)
-			rand.Read(b)
-			code := hex.EncodeToString(b)
-
-			s.SaveCode(&models.AuthCode{
-				Code:                code,
-				ClientID:            clientID,
-				UserID:              user.ID,
-				RedirectURI:         redirectURI,
-				Scope:               scope,
-				Nonce:               nonce,
-				ExpiresAt:           time.Now().Add(5 * time.Minute),
-				CodeChallenge:       codeChallenge,
-				CodeChallengeMethod: codeChallengeMethod,
-			})
-
-			dest, _ := url.Parse(redirectURI)
-			params := url.Values{}
-			params.Set("code", code)
-			params.Set("state", state)
-			dest.RawQuery = params.Encode()
-			http.Redirect(w, r, dest.String(), http.StatusFound)
-			return
-		}
-
-		renderAuthPage(w, authPageData{
-			Title:               "Sign in to continue",
-			ClientID:            clientID,
-			RedirectURI:         redirectURI,
-			State:               state,
-			Scope:               scope,
-			Nonce:               nonce,
-			CodeChallenge:       codeChallenge,
-			CodeChallengeMethod: codeChallengeMethod,
-		})
+		handleAuthorizeSubmission(w, r, s, req)
 	}
+}
+
+type authorizeRequest struct {
+	ClientID            string
+	RedirectURI         string
+	State               string
+	Scope               string
+	ResponseType        string
+	Nonce               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+}
+
+type authFormState struct {
+	ErrorMessage   string
+	Username       string
+	SignupUsername string
+	SignupEmail    string
+	SignupName     string
+}
+
+func readAuthorizeRequest(r *http.Request) authorizeRequest {
+	q := r.URL.Query()
+	return authorizeRequest{
+		ClientID:            q.Get("client_id"),
+		RedirectURI:         q.Get("redirect_uri"),
+		State:               q.Get("state"),
+		Scope:               q.Get("scope"),
+		ResponseType:        q.Get("response_type"),
+		Nonce:               q.Get("nonce"),
+		CodeChallenge:       q.Get("code_challenge"),
+		CodeChallengeMethod: q.Get("code_challenge_method"),
+	}
+}
+
+func validateAuthorizeRequest(w http.ResponseWriter, r *http.Request, s *store.Store, req authorizeRequest, devMode bool) bool {
+	if req.ResponseType != "code" {
+		errs.HTTPError(w, errs.JSONErrUnsupportedResponseType, http.StatusBadRequest)
+		return false
+	}
+
+	client, err := s.GetClient(req.ClientID)
+	if err != nil {
+		errs.HTTPError(w, errs.JSONErrInvalidClient, http.StatusBadRequest)
+		return false
+	}
+
+	if !isValidRedirect(client.RedirectURIs, req.RedirectURI, devMode) {
+		errs.HTTPError(w, errs.JSONErrInvalidRedirectURI, http.StatusBadRequest)
+		return false
+	}
+
+	return validateAuthorizePKCE(w, r, req)
+}
+
+func validateAuthorizePKCE(w http.ResponseWriter, r *http.Request, req authorizeRequest) bool {
+	if req.State == "" {
+		errs.RedirectError(w, r, req.RedirectURI, errs.CodeInvalidRequest, errs.MsgStateRequired, "")
+		return false
+	}
+	if req.CodeChallenge == "" {
+		errs.RedirectError(w, r, req.RedirectURI, errs.CodeInvalidRequest, errs.MsgCodeChallengeRequired, req.State)
+		return false
+	}
+	if req.CodeChallengeMethod != "S256" {
+		errs.RedirectError(w, r, req.RedirectURI, errs.CodeInvalidRequest, errs.MsgOnlyS256Allowed, req.State)
+		return false
+	}
+
+	return true
+}
+
+func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.Store, req authorizeRequest) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	user, formState, err := authorizeUserFromForm(s, r)
+	if err != nil {
+		renderAuthorizePage(w, req, formState)
+		return
+	}
+
+	if err := redirectAuthorizedUser(w, r, s, user, req); err != nil {
+		http.Error(w, "failed to issue authorization code", http.StatusInternalServerError)
+	}
+}
+
+func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authFormState, error) {
+	signupUsername := r.FormValue("signup_username")
+	if signupUsername != "" {
+		user := &models.User{
+			Username: signupUsername,
+			Email:    r.FormValue("signup_email"),
+			Name:     r.FormValue("signup_name"),
+			Password: r.FormValue("signup_password"),
+		}
+		if err := s.CreateUser(user); err != nil {
+			return nil, authFormState{
+				ErrorMessage:   "Username or email already taken.",
+				SignupUsername: signupUsername,
+				SignupEmail:    r.FormValue("signup_email"),
+				SignupName:     r.FormValue("signup_name"),
+			}, err
+		}
+		return user, authFormState{}, nil
+	}
+
+	username := r.FormValue("username")
+	user, err := s.GetUserByCredentials(username, r.FormValue("password"))
+	if err != nil {
+		return nil, authFormState{
+			ErrorMessage: "Invalid username or password.",
+			Username:     username,
+		}, err
+	}
+
+	return user, authFormState{}, nil
+}
+
+func redirectAuthorizedUser(w http.ResponseWriter, r *http.Request, s *store.Store, user *models.User, req authorizeRequest) error {
+	code, err := generateAuthorizationCode()
+	if err != nil {
+		return err
+	}
+
+	s.SaveCode(&models.AuthCode{
+		Code:                code,
+		ClientID:            req.ClientID,
+		UserID:              user.ID,
+		RedirectURI:         req.RedirectURI,
+		Scope:               req.Scope,
+		Nonce:               req.Nonce,
+		ExpiresAt:           time.Now().Add(5 * time.Minute),
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+	})
+
+	dest, err := authorizationRedirectURL(req.RedirectURI, code, req.State)
+	if err != nil {
+		return err
+	}
+
+	http.Redirect(w, r, dest, http.StatusFound)
+	return nil
+}
+
+func generateAuthorizationCode() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func authorizationRedirectURL(redirectURI, code, state string) (string, error) {
+	dest, err := url.Parse(redirectURI)
+	if err != nil {
+		return "", err
+	}
+
+	params := url.Values{}
+	params.Set("code", code)
+	params.Set("state", state)
+	dest.RawQuery = params.Encode()
+	return dest.String(), nil
+}
+
+func renderAuthorizePage(w http.ResponseWriter, req authorizeRequest, formState authFormState) {
+	renderAuthPage(w, authPageData{
+		Title:               "Sign in to continue",
+		ErrorMessage:        formState.ErrorMessage,
+		ClientID:            req.ClientID,
+		RedirectURI:         req.RedirectURI,
+		State:               req.State,
+		Scope:               req.Scope,
+		Nonce:               req.Nonce,
+		CodeChallenge:       req.CodeChallenge,
+		CodeChallengeMethod: req.CodeChallengeMethod,
+		Username:            formState.Username,
+		SignupUsername:      formState.SignupUsername,
+		SignupEmail:         formState.SignupEmail,
+		SignupName:          formState.SignupName,
+	})
 }
 
 func isValidRedirect(allowed []string, uri string, devMode bool) bool {

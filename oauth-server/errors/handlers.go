@@ -7,10 +7,15 @@ import (
 	"net/url"
 )
 
+const (
+	contentTypeHeader = "Content-Type"
+	applicationJSON   = "application/json"
+)
+
 // TokenError writes an OAuth 2.0 error response for the token endpoint
 // RFC 6749 Section 5.2: Error Response
 func TokenError(w http.ResponseWriter, errCode, desc string) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.WriteHeader(http.StatusBadRequest)
 	json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,
@@ -35,7 +40,7 @@ func RedirectError(w http.ResponseWriter, r *http.Request, redirectURI, errCode,
 // WriteError writes an OAuth 2.0 error response for resource servers
 // RFC 6750 Section 3: Error Response
 func WriteError(w http.ResponseWriter, status int, errCode, description string) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s"`, errCode))
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"error":%q,"error_description":%q}`, errCode, description)
@@ -44,7 +49,7 @@ func WriteError(w http.ResponseWriter, status int, errCode, description string) 
 // HTTPError writes a generic error response using JSON
 // Used for endpoints like introspection, revocation, userinfo when they need to return JSON errors
 func HTTPError(w http.ResponseWriter, errJSON string, status int) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.WriteHeader(status)
 	w.Write([]byte(errJSON))
 }

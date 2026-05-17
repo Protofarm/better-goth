@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" xml:lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Authorize</title>
@@ -50,14 +50,14 @@
 	<div class="panel">
 		<h3>Create Account</h3>
 		<form method="POST" action="/signup">
-			<label>Username</label>
-			<input type="text" name="signup_username" autocomplete="username" value="{{.SignupUsername}}" required>
-			<label>Email</label>
-			<input type="email" name="signup_email" autocomplete="email" value="{{.SignupEmail}}">
-			<label>Display Name</label>
-			<input type="text" name="signup_name" autocomplete="name" value="{{.SignupName}}">
-			<label>Password</label>
-			<input type="password" name="signup_password" autocomplete="new-password" required>
+			<label for="standalone-signup-username">Username</label>
+			<input id="standalone-signup-username" type="text" name="signup_username" autocomplete="username" value="{{.SignupUsername}}" required>
+			<label for="standalone-signup-email">Email</label>
+			<input id="standalone-signup-email" type="email" name="signup_email" autocomplete="email" value="{{.SignupEmail}}">
+			<label for="standalone-signup-name">Display Name</label>
+			<input id="standalone-signup-name" type="text" name="signup_name" autocomplete="name" value="{{.SignupName}}">
+			<label for="standalone-signup-password">Password</label>
+			<input id="standalone-signup-password" type="password" name="signup_password" autocomplete="new-password" required>
 			<button type="submit">Create Account</button>
 		</form>
 		<p style="margin-top:12px;color:#555">After signup, return to your app and start login with <strong>/login/oauthserver</strong>.</p>
@@ -74,10 +74,10 @@
 				<input type="hidden" name="nonce" value="{{.Nonce}}">
 				<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 				<input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-				<label>Username</label>
-				<input type="text" name="username" autocomplete="username" value="{{.Username}}" required>
-				<label>Password</label>
-				<input type="password" name="password" autocomplete="current-password" required>
+				<label for="signin-username">Username</label>
+				<input id="signin-username" type="text" name="username" autocomplete="username" value="{{.Username}}" required>
+				<label for="signin-password">Password</label>
+				<input id="signin-password" type="password" name="password" autocomplete="current-password" required>
 				<button type="submit">Authorize</button>
 			</form>
 		</div>
@@ -92,14 +92,14 @@
 				<input type="hidden" name="nonce" value="{{.Nonce}}">
 				<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
 				<input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-				<label>Username</label>
-				<input type="text" name="signup_username" autocomplete="username" value="{{.SignupUsername}}" required>
-				<label>Email</label>
-				<input type="email" name="signup_email" autocomplete="email" value="{{.SignupEmail}}">
-				<label>Display Name</label>
-				<input type="text" name="signup_name" autocomplete="name" value="{{.SignupName}}">
-				<label>Password</label>
-				<input type="password" name="signup_password" autocomplete="new-password" required>
+				<label for="signup-username">Username</label>
+				<input id="signup-username" type="text" name="signup_username" autocomplete="username" value="{{.SignupUsername}}" required>
+				<label for="signup-email">Email</label>
+				<input id="signup-email" type="email" name="signup_email" autocomplete="email" value="{{.SignupEmail}}">
+				<label for="signup-name">Display Name</label>
+				<input id="signup-name" type="text" name="signup_name" autocomplete="name" value="{{.SignupName}}">
+				<label for="signup-password">Password</label>
+				<input id="signup-password" type="password" name="signup_password" autocomplete="new-password" required>
 				<button type="submit">Create Account</button>
 			</form>
 		</div>

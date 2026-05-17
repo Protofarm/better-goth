@@ -20,108 +20,132 @@ func IntrospectionHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc 
 			return
 		}
 
-		// RFC 7662 Section 2.1: client authentication is required for introspection.
-		clientID, clientSecret := extractClientCredentials(r)
-		if clientID == "" {
-			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
-			return
-		}
-
-		client, err := s.GetClient(clientID)
-		if err != nil || client.ClientSecret != clientSecret {
-			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
-			return
-		}
-
-		if err := r.ParseForm(); err != nil {
-			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
-			return
-		}
-
-		token := r.Form.Get("token")
-		if token == "" {
-			errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
-			return
-		}
-
-		token_type_hint := r.Form.Get("token_type_hint")
-		res := &introspectionResponse{Active: false}
-
-		// RFC 7662 Section 2.1: extend the search across supported token types.
-		var tok *models.Token
-		switch token_type_hint {
-		case "refresh_token":
-			tok, err = s.GetByRefreshToken(token)
-			if err == nil && tok.ClientID != clientID {
-				json.NewEncoder(w).Encode(res)
-				return
-			}
-			if err != nil {
-				tok, err = s.GetByAccessToken(token)
-				if err == nil && tok.ClientID != clientID {
-					json.NewEncoder(w).Encode(res)
-					return
-				}
-			}
-		default: // handle access_token and default
-			tok, err = s.GetByAccessToken(token)
-			if err == nil && tok.ClientID != clientID {
-				json.NewEncoder(w).Encode(res)
-				return
-			}
-			if err != nil {
-				tok, err = s.GetByRefreshToken(token)
-				if err == nil && tok.ClientID != clientID {
-					json.NewEncoder(w).Encode(res)
-					return
-				}
-			}
-		}
-
-		if err != nil || tok == nil || time.Now().After(tok.ExpiresAt) {
-			json.NewEncoder(w).Encode(res)
-			return
-		}
-
-		jwtToken, err := km.ParseJWT(token)
-
-		if err != nil || !jwtToken.Valid {
-			json.NewEncoder(w).Encode(res)
-			return
-		}
-
-		claims, ok := jwtToken.Claims.(jwt.MapClaims)
+		clientID, ok := authenticateIntrospectionClient(w, r, s)
 		if !ok {
-			json.NewEncoder(w).Encode(res)
 			return
 		}
-		res.Active = true
-		res.Scope = tok.Scope
-		res.ClientId = tok.ClientID
-		res.TokenType = tok.TokenType
 
-		exp, err := claims.GetExpirationTime()
-		if err == nil {
-			res.Exp = exp.Unix()
+		token, tokenTypeHint, ok := parseIntrospectionRequest(w, r)
+		if !ok {
+			return
 		}
-		iat, err := claims.GetIssuedAt()
-		if err == nil {
-			res.Iat = iat.Unix()
-		}
-		sub, err := claims.GetSubject()
-		if err == nil {
-			res.Sub = sub
-		}
-		aud, err := claims.GetAudience()
-		if err == nil && len(aud) > 0 {
-			res.Aud = aud[0]
-		}
-		iss, err := claims.GetIssuer()
-		if err == nil {
-			res.Iss = iss
-		}
+
+		res := introspectToken(s, km, clientID, token, tokenTypeHint)
 		_ = json.NewEncoder(w).Encode(res)
 	}
+}
+
+func authenticateIntrospectionClient(w http.ResponseWriter, r *http.Request, s *store.Store) (string, bool) {
+	clientID, clientSecret := extractClientCredentials(r)
+	if clientID == "" {
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
+		return "", false
+	}
+
+	client, err := s.GetClient(clientID)
+	if err != nil || client.ClientSecret != clientSecret {
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
+		return "", false
+	}
+
+	return clientID, true
+}
+
+func parseIntrospectionRequest(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	if err := r.ParseForm(); err != nil {
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
+		return "", "", false
+	}
+
+	token := r.Form.Get("token")
+	if token == "" {
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
+		return "", "", false
+	}
+
+	return token, r.Form.Get("token_type_hint"), true
+}
+
+func introspectToken(s *store.Store, km *keys.KeyManager, clientID, token, tokenTypeHint string) *introspectionResponse {
+	res := &introspectionResponse{Active: false}
+
+	tok, ok := lookupTokenForClient(s, clientID, token, tokenTypeHint)
+	if !ok || time.Now().After(tok.ExpiresAt) {
+		return res
+	}
+
+	claims, ok := parseJWTClaims(km, token)
+	if !ok {
+		return res
+	}
+
+	return activeIntrospectionResponse(tok, claims)
+}
+
+func lookupTokenForClient(s *store.Store, clientID, token, tokenTypeHint string) (*models.Token, bool) {
+	for _, lookup := range tokenLookupOrder(s, tokenTypeHint) {
+		tok, err := lookup(token)
+		if err != nil {
+			continue
+		}
+		if tok.ClientID != clientID {
+			return nil, false
+		}
+		return tok, true
+	}
+
+	return nil, false
+}
+
+func tokenLookupOrder(s *store.Store, tokenTypeHint string) []func(string) (*models.Token, error) {
+	if tokenTypeHint == "refresh_token" {
+		return []func(string) (*models.Token, error){
+			s.GetByRefreshToken,
+			s.GetByAccessToken,
+		}
+	}
+
+	return []func(string) (*models.Token, error){
+		s.GetByAccessToken,
+		s.GetByRefreshToken,
+	}
+}
+
+func parseJWTClaims(km *keys.KeyManager, token string) (jwt.MapClaims, bool) {
+	jwtToken, err := km.ParseJWT(token)
+	if err != nil || !jwtToken.Valid {
+		return nil, false
+	}
+
+	claims, ok := jwtToken.Claims.(jwt.MapClaims)
+	return claims, ok
+}
+
+func activeIntrospectionResponse(tok *models.Token, claims jwt.MapClaims) *introspectionResponse {
+	res := &introspectionResponse{
+		Active:    true,
+		Scope:     tok.Scope,
+		ClientId:  tok.ClientID,
+		TokenType: tok.TokenType,
+	}
+
+	if exp, err := claims.GetExpirationTime(); err == nil {
+		res.Exp = exp.Unix()
+	}
+	if iat, err := claims.GetIssuedAt(); err == nil {
+		res.Iat = iat.Unix()
+	}
+	if sub, err := claims.GetSubject(); err == nil {
+		res.Sub = sub
+	}
+	if aud, err := claims.GetAudience(); err == nil && len(aud) > 0 {
+		res.Aud = aud[0]
+	}
+	if iss, err := claims.GetIssuer(); err == nil {
+		res.Iss = iss
+	}
+
+	return res
 }
 
 type introspectionResponse struct {

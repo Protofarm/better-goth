@@ -147,7 +147,7 @@ func verifyTokenTestCase(t *testing.T, auth *Auth, tt struct {
 	wantError error
 }) {
 	user, err := auth.VerifyToken(tt.token)
-	
+
 	if tt.wantError != nil {
 		if !errors.Is(err, tt.wantError) {
 			t.Fatalf(verifyTokenMsg, err)
@@ -230,7 +230,7 @@ func verifyRequestTestCase(t *testing.T, auth *Auth, tt struct {
 	}
 
 	user, err := auth.VerifyRequest(req)
-	
+
 	if tt.wantError != nil {
 		if !errors.Is(err, tt.wantError) {
 			t.Fatalf(verifyRequestMsg, err)

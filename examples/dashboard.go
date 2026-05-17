@@ -1,11 +1,16 @@
 package main
 
 import (
-	"encoding/json"
 	"html/template"
 	"net/http"
 
-	bettergoth "github.com/Protofarm/better-goth"
+	bettergoth "github.com/Protofarm/better-goth/better-goth"
+)
+
+const (
+	appOwner                    = "App"
+	appRouteLibraryHandlerOwner = "App route -> library handler"
+	appRouteWithHookOwner       = "App route -> library handler + app hook"
 )
 
 type routeInfo struct {
@@ -17,104 +22,47 @@ type routeInfo struct {
 
 type dashboardData struct {
 	User         *bettergoth.VerifiedUser
-	UserDetails  *tokenRecord
+	UserDetails  *bettergoth.TokenRecord
 	Routes       []routeInfo
 	CookieSecure bool
 }
 
-func dashboardRoutes() []routeInfo {
-	return []routeInfo{
-		{
-			Method:      "GET",
-			Path:        "/help",
-			Owner:       "App",
-			Description: "RFC 9650 RDAP help endpoint - advertises authentication capabilities with 'farv1' support",
-		},
-		{
-			Method:      "GET",
-			Path:        "/",
-			Owner:       "App",
-			Description: "Homepage with login options",
-		},
-		{
-			Method:      "GET",
-			Path:        "/login/oauthserver",
-			Owner:       "Library (better-goth)",
-			Description: "Starts OAuth 2.0 authorization code flow against local oauth-server",
-		},
-		{
-			Method:      "GET",
-			Path:        "/callback/oauthserver",
-			Owner:       "Library + App hook",
-			Description: "OAuth callback - library validates, app handles result via AuthResultHandler",
-		},
-		{
-			Method:      "GET",
-			Path:        "/dashboard",
-			Owner:       "App",
-			Description: "Protected dashboard showing route ownership and user details (session cookie auth)",
-		},
-		{
-			Method:      "POST",
-			Path:        "/admin/rotate",
-			Owner:       "App",
-			Description: "Triggers oauth-server RSA key rotation through the protected app",
-		},
-		{
-			Method:      "GET",
-			Path:        "/api/resource",
-			Owner:       "App",
-			Description: "Protected resource endpoint using session cookie authentication (RFC 6750 via cookie)",
-		},
-		{
-			Method:      "GET",
-			Path:        "/api/resource/bearer",
-			Owner:       "App",
-			Description: "Protected resource endpoint using Bearer token (RFC 6750) from Authorization header",
-		},
-		{
-			Method:      "POST",
-			Path:        "/signout",
-			Owner:       "App",
-			Description: "Clears the JWT cookie and redirects to the homepage",
-		},
-		{
-			Method:      "POST",
-			Path:        "/v1/tokens/store",
-			Owner:       "App",
-			Description: "Stores a token record in the in-memory token store",
-		},
-		{
-			Method:      "GET",
-			Path:        "/v1/tokens",
-			Owner:       "App",
-			Description: "Returns all in-memory token records as JSON",
-		},
-		{
-			Method:      "GET",
-			Path:        "/v1/tokens/{sessionID}",
-			Owner:       "App",
-			Description: "Returns one in-memory token record by sessionID as JSON",
-		},
-		{
-			Method:      "PUT",
-			Path:        "/v1/tokens/{sessionID}",
-			Owner:       "App",
-			Description: "Updates one in-memory token record by sessionID",
-		},
+func route(method, path, owner, description string) routeInfo {
+	return routeInfo{
+		Method:      method,
+		Path:        path,
+		Owner:       owner,
+		Description: description,
 	}
 }
 
-func handleDashboard(auth *bettergoth.Auth, store *tokenStore, dashboardTemplate any, cookieSecure bool) http.Handler {
-	return authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func dashboardRoutes() []routeInfo {
+	return []routeInfo{
+		route("GET", "/help", appOwner, "RFC 9650 RDAP help endpoint - advertises authentication capabilities with 'farv1' support"),
+		route("GET", "/", appOwner, "Homepage with login options"),
+		route("GET", "/login/oauthserver", appRouteLibraryHandlerOwner, "Starts OAuth 2.0 authorization code flow against the configured provider"),
+		route("GET", "/callback/oauthserver", appRouteWithHookOwner, "OAuth callback - better-goth validates tokens and the app handles the result hook"),
+		route("GET", "/dashboard", appOwner, "Protected dashboard showing route ownership and user details (session cookie auth)"),
+		route("GET", "/api/resource", appRouteLibraryHandlerOwner, "Protected resource endpoint using session cookie authentication (RFC 6750 via cookie)"),
+		route("GET", "/api/resource/bearer", appRouteLibraryHandlerOwner, "Protected resource endpoint using Bearer token (RFC 6750) from Authorization header"),
+		route("POST", "/signout", appRouteLibraryHandlerOwner, "Clears the JWT cookie and redirects to the homepage"),
+		route("POST", "/v1/tokens/store", appRouteLibraryHandlerOwner, "Stores a token record in the better-goth in-memory token store"),
+		route("GET", "/v1/tokens", appRouteLibraryHandlerOwner, "Returns all in-memory token records as JSON"),
+		route("GET", "/v1/tokens/{sessionID}", appRouteLibraryHandlerOwner, "Returns one in-memory token record by sessionID as JSON"),
+		route("PUT", "/v1/tokens/{sessionID}", appRouteLibraryHandlerOwner, "Updates one in-memory token record by sessionID"),
+	}
+}
+
+func handleDashboard(auth *bettergoth.Auth, store *bettergoth.TokenStore, dashboardTemplate *template.Template, cookieName string, cookieSecure bool) http.Handler {
+	return bettergoth.AuthFromCookie(auth, cookieName, "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := bettergoth.UserFromContext(r.Context())
 		if !ok {
 			http.Error(w, "missing user from context", http.StatusInternalServerError)
 			return
 		}
 
-		var details *tokenRecord
-		if rec, found := store.getBySub(user.Subject); found {
+		var details *bettergoth.TokenRecord
+		if rec, found := store.Get(user.Subject); found {
 			details = &rec
 		}
 
@@ -125,27 +73,9 @@ func handleDashboard(auth *bettergoth.Auth, store *tokenStore, dashboardTemplate
 			Routes:       dashboardRoutes(),
 		}
 
-		tmpl := dashboardTemplate.(*template.Template)
-		if err := tmpl.Execute(w, data); err != nil {
+		if err := dashboardTemplate.Execute(w, data); err != nil {
 			http.Error(w, "failed to render dashboard", http.StatusInternalServerError)
 			return
 		}
-	}))
-}
-
-func handleAPIResource(auth *bettergoth.Auth) http.Handler {
-	return authFromCookie(auth, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := bettergoth.UserFromContext(r.Context())
-		if !ok {
-			http.Error(w, "missing user from context", http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"sub":            user.Subject,
-			"message":        "protected resource access granted",
-			"authentication": "session cookie",
-		})
 	}))
 }

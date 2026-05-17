@@ -81,10 +81,6 @@
     <button class="button" type="submit">Sign out</button>
   </form>
 
-  <form id="rotate-form" method="POST" action="/admin/rotate" style="margin: 0 0 1rem;">
-    <button class="button" type="submit">Rotate oauth-server key</button>
-  </form>
-
   <script>
     document.getElementById('signout-form').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -111,11 +107,15 @@
           console.error('Revocation failed:', err);
         }
       }
-      
-      // Clear all stored tokens and redirect
+
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
-      window.location.href = '/';
+
+      try {
+        await fetch('/signout', { method: 'POST' });
+      } finally {
+        globalThis.location.href = '/';
+      }
     });
   </script>
 
@@ -129,7 +129,7 @@
 
       {{ if .UserDetails }}
       <h3>Provider profile snapshot</h3>
-      <p>(from in-memory app store)</p>
+      <p>(from better-goth in-memory store)</p>
       <ul>
         <li><strong>Provider:</strong> {{ .UserDetails.Provider }}</li>
         <li><strong>Name:</strong> {{ .UserDetails.Name }}</li>

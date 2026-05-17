@@ -6,11 +6,3 @@ type ErrorResponse struct {
 	ErrorDescription string `json:"error_description,omitempty"`
 	ErrorURI         string `json:"error_uri,omitempty"`
 }
-
-// NewErrorResponse creates a new error response with the given error code and description
-func NewErrorResponse(errCode, description string) *ErrorResponse {
-	return &ErrorResponse{
-		Error:            errCode,
-		ErrorDescription: description,
-	}
-}

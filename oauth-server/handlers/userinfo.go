@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -43,12 +44,14 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"sub":        user.ID,
 			"name":       user.Name,
 			"email":      user.Email,
-			"picture":    user.AvatarURL.String(), // OIDC standard field name
-			"avatar_url": user.AvatarURL,          // also expose as avatar_url
-		})
+			"picture":    user.AvatarURL, // OIDC standard field name
+			"avatar_url": user.AvatarURL, // also expose as avatar_url
+		}); err != nil {
+			log.Printf("failed to write userinfo response: %v", err)
+		}
 	}
 }

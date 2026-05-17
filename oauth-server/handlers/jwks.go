@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"math/big"
 	"net/http"
 
@@ -33,12 +34,12 @@ func JWKSHandler(km *keys.KeyManager) http.HandlerFunc {
 			})
 		}
 
-		res, _ := json.Marshal(map[string]interface{}{
-			"keys": jwks,
-		})
-
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
-		w.Write(res)
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"keys": jwks,
+		}); err != nil {
+			log.Printf("failed to write JWKS response: %v", err)
+		}
 	}
 }

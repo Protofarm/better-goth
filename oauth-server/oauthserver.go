@@ -2,6 +2,7 @@ package oauthserver
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -84,7 +85,9 @@ func CreateOAuthServer(cfg ServerConfig) (*http.ServeMux, error) {
 			IDTokenSigningAlgValuesSupport: []string{"RS256"},
 		}
 
-		_ = json.NewEncoder(w).Encode(cfg)
+		if err := json.NewEncoder(w).Encode(cfg); err != nil {
+			log.Printf("failed to write openid configuration response: %v", err)
+		}
 	})
 
 	return mux, nil

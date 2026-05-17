@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
@@ -24,10 +25,12 @@ func RotateHandler(km *keys.KeyManager) http.HandlerFunc {
 		active := km.GetActiveKey()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "rotated",
 			"kid":    active.Kid,
-		})
+		}); err != nil {
+			log.Printf("failed to write rotate response: %v", err)
+		}
 
 	}
 }

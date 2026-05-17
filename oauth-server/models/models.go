@@ -10,7 +10,7 @@ type URL struct {
 	url.URL
 }
 
-func (u URL) MarshalJSON() ([]byte, error) {
+func (u *URL) MarshalJSON() ([]byte, error) {
 	return json.Marshal(u.String())
 }
 
@@ -28,11 +28,12 @@ func (u *URL) UnmarshalJSON(data []byte) error {
 }
 
 func ParseURL(raw string) (URL, error) {
-	u, err := url.Parse(raw)
+	parsed, err := url.Parse(raw)
 	if err != nil {
 		return URL{}, err
 	}
-	return URL{*u}, nil
+
+	return URL{URL: *parsed}, nil
 }
 
 type User struct {

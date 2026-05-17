@@ -126,7 +126,9 @@ func writeTokenResponse(w http.ResponseWriter, s *store.Store, tok *models.Token
 	}
 
 	writeTokenResponseHeaders(w)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func shouldIncludeIDToken(tok *models.Token, grantType string) bool {
@@ -219,7 +221,9 @@ func handleClientCredentials(clientID string) (*models.Token, error) {
 
 func newToken(userID, clientID, scope string) *models.Token {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("failed to generate random token bytes: %v", err))
+	}
 	return &models.Token{
 		AccessToken:  hex.EncodeToString(b), // overwritten by JWT after signing
 		RefreshToken: hex.EncodeToString(b[:16]),
@@ -293,7 +297,7 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 		"token_use":      "id",
 		"auth_time":      now.Unix(),
 		"azp":            tok.ClientID,
-		"picture":        user.AvatarURL.String(),
+		"picture":        user.AvatarURL,
 		"email":          user.Email,
 		"email_verified": false,
 		"name":           user.Name,

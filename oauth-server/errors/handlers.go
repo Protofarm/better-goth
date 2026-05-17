@@ -3,6 +3,7 @@ package errors
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 )
@@ -17,10 +18,12 @@ const (
 func TokenError(w http.ResponseWriter, errCode, desc string) {
 	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.WriteHeader(http.StatusBadRequest)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,
 		"error_description": desc,
-	})
+	}); err != nil {
+		log.Printf("failed to write token error response: %v", err)
+	}
 }
 
 // RedirectError writes an error response that redirects with error parameters
@@ -43,7 +46,9 @@ func WriteError(w http.ResponseWriter, status int, errCode, description string) 
 	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer error="%s"`, errCode))
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q,"error_description":%q}`, errCode, description)
+	if _, err := fmt.Fprintf(w, `{"error":%q,"error_description":%q}`, errCode, description); err != nil {
+		log.Printf("failed to write OAuth error response: %v", err)
+	}
 }
 
 // HTTPError writes a generic error response using JSON
@@ -51,5 +56,7 @@ func WriteError(w http.ResponseWriter, status int, errCode, description string) 
 func HTTPError(w http.ResponseWriter, errJSON string, status int) {
 	w.Header().Set(contentTypeHeader, applicationJSON)
 	w.WriteHeader(status)
-	w.Write([]byte(errJSON))
+	if _, err := w.Write([]byte(errJSON)); err != nil {
+		log.Printf("failed to write HTTP error response: %v", err)
+	}
 }

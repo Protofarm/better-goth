@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -31,7 +32,9 @@ func IntrospectionHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc 
 		}
 
 		res := introspectToken(s, km, clientID, token, tokenTypeHint)
-		_ = json.NewEncoder(w).Encode(res)
+		if err := json.NewEncoder(w).Encode(res); err != nil {
+			log.Printf("failed to write introspection response: %v", err)
+		}
 	}
 }
 

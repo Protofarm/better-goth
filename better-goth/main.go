@@ -20,8 +20,6 @@ import (
 	yamlconfig "github.com/Protofarm/better-goth/yamlconfig"
 )
 
-var ErrMissingRouter = errors.New("router is required")
-
 const (
 	headerContentType = "Content-Type"
 	jsonContentType   = "application/json; charset=utf-8"
@@ -102,21 +100,6 @@ func Setup(configPath string) (*Runtime, error) {
 	}
 
 	return ctx.newRuntime(auth, NewTokenStore()), nil
-}
-
-// StartBetterGoth wires the oauth server, providers, and auth routes using the YAML config.
-func StartBetterGoth(configPath string, router RouteRegistrar) (string, error) {
-	if router == nil {
-		return "", ErrMissingRouter
-	}
-
-	runtime, err := Setup(configPath)
-	if err != nil {
-		return "", err
-	}
-
-	RegisterRoutes(router, runtime.Auth)
-	return runtime.ListenAddr, nil
 }
 
 func newSetupContext(configPath string) (*setupContext, error) {
@@ -623,7 +606,11 @@ func NewTokenGetHandler(store *TokenStore) func(http.ResponseWriter, *http.Reque
 
 func NewTokenStoreHandler(store *TokenStore) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				log.Printf("failed to close request body: %v", err)
+			}
+		}()
 
 		var rec TokenRecord
 		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
@@ -648,7 +635,11 @@ func NewTokenUpdateHandler(store *TokenStore) func(http.ResponseWriter, *http.Re
 			return
 		}
 
-		defer r.Body.Close()
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				log.Printf("failed to close request body: %v", err)
+			}
+		}()
 
 		var rec TokenRecord
 		if err := json.NewDecoder(r.Body).Decode(&rec); err != nil {
@@ -692,11 +683,12 @@ func ClearAuthCookie(w http.ResponseWriter, cookieName string, cookieSecure bool
 		MaxAge:   -1,
 	})
 }
-
 func WriteJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set(headerContentType, jsonContentType)
 	if status > 0 {
 		w.WriteHeader(status)
 	}
-	_ = json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("failed to write JSON response: %v", err)
+	}
 }

@@ -37,12 +37,6 @@ type Config struct {
 				KeyPath  string `yaml:"key_path"`
 			} `yaml:"tls"`
 		} `yaml:"oauthserver"`
-		Google struct {
-			Enabled      bool   `yaml:"enabled"`
-			ClientID     string `yaml:"client_id"`
-			ClientSecret string `yaml:"client_secret"`
-			RedirectURI  string `yaml:"redirect_uri"`
-		} `yaml:"google"`
 		External map[string]ProviderConfig `yaml:",inline"`
 	} `yaml:"providers"`
 

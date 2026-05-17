@@ -52,11 +52,6 @@ type runtimeConfig struct {
 	OAuthTLSKeyPath   string
 	OAuthTLSEnabled   bool
 
-	GoogleEnabled      bool
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleRedirectURI  string
-
 	ExternalProviders map[string]yamlconfig.ProviderConfig
 }
 
@@ -76,7 +71,6 @@ type Runtime struct {
 	CookieSecure  bool
 	OAuthIssuer   string
 	OAuthClientID string
-	GoogleEnabled bool
 }
 
 // Setup wires the oauth server and providers using the YAML config.
@@ -137,7 +131,6 @@ func (ctx *setupContext) newRuntime(auth *Auth, store *TokenStore) *Runtime {
 		CookieSecure:  rc.CookieSecure,
 		OAuthIssuer:   rc.OAuthIssuer,
 		OAuthClientID: rc.OAuthClientID,
-		GoogleEnabled: rc.GoogleEnabled,
 	}
 }
 
@@ -191,7 +184,6 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		oauthClientSecret = "my-secret"
 	}
 
-	googleCfg := cfg.Providers.Google
 	rc := runtimeConfig{
 		AppPort:      appPort,
 		AppScheme:    appScheme,
@@ -211,10 +203,6 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		OAuthTLSKeyPath:   ctx.resolveConfigPath(oauthCfg.TLS.KeyPath, ""),
 		OAuthTLSEnabled:   oauthCfg.TLS.Enabled,
 
-		GoogleEnabled:      googleCfg.Enabled,
-		GoogleClientID:     googleCfg.ClientID,
-		GoogleClientSecret: googleCfg.ClientSecret,
-
 		ExternalProviders: cfg.Providers.External,
 	}
 
@@ -225,11 +213,6 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		}
 	}
 	rc.OAuthRedirectURL = rc.OAuthRedirectURIs[0]
-
-	rc.GoogleRedirectURI = trim(googleCfg.RedirectURI)
-	if rc.GoogleRedirectURI == "" {
-		rc.GoogleRedirectURI = fmt.Sprintf("%s://localhost:%s/callback/google", rc.AppScheme, rc.AppPort)
-	}
 
 	return rc
 }
@@ -305,7 +288,6 @@ func (ctx *setupContext) addProviders(auth *Auth) error {
 		return err
 	}
 
-	ctx.addGoogleProvider(auth)
 	ctx.addExternalProviders(auth)
 	return nil
 }
@@ -329,31 +311,6 @@ func (ctx *setupContext) addOAuthServerProvider(auth *Auth) error {
 
 	auth.AddProvider(oauthServerProvider)
 	return nil
-}
-
-func (ctx *setupContext) addGoogleProvider(auth *Auth) {
-	rc := ctx.runtime
-	if !rc.GoogleEnabled {
-		return
-	}
-	if rc.GoogleClientID == "" || rc.GoogleClientSecret == "" {
-		log.Printf("Google provider enabled but missing client_id/client_secret")
-		return
-	}
-
-	googleProvider, err := providers.NewGoogleProvider(
-		rc.GoogleClientID,
-		rc.GoogleClientSecret,
-		rc.GoogleRedirectURI,
-		[]string{},
-	)
-	if err != nil {
-		log.Printf("Warning: failed to create Google provider: %v", err)
-		return
-	}
-
-	auth.AddProvider(googleProvider)
-	log.Printf("Google provider registered")
 }
 
 func (ctx *setupContext) addExternalProviders(auth *Auth) {

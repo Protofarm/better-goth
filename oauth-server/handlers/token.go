@@ -35,7 +35,7 @@ func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.Handl
 			return
 		}
 
-		client, ok := authenticateTokenClient(w, r, s)
+		client, ok := authenticateTokenClient(w, r, s, issuer)
 		if !ok {
 			return
 		}
@@ -66,8 +66,22 @@ func parseGrantType(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return grantType, true
 }
 
-func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store) (*models.Client, bool) {
+func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store, issuer string) (*models.Client, bool) {
+
+	// RFC 7523 private_key_jwt
+	if r.FormValue("client_assertion") != "" {
+		client, err := authenticatePrivateKeyJWT(r, s, issuer)
+		if err != nil {
+			errs.TokenError(w, errs.CodeInvalidClient, err.Error())
+			return nil, false
+		}
+
+		return client, true
+	}
+
+	// client_secret_basic + client_secret_post
 	clientID, clientSecret := extractClientCredentials(r)
+
 	if clientID == "" {
 		errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgClientIDRequired)
 		return nil, false
@@ -83,6 +97,110 @@ func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.St
 	return client, true
 }
 
+func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (*models.Client, error) {
+	assertion, err := validateClientAssertionRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	claims, err := parseUnverifiedAssertion(assertion)
+	if err != nil {
+		return nil, err
+	}
+
+	clientID, err := validateAssertionClaims(claims, issuer)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := s.GetClient(clientID)
+	if err != nil {
+		return nil, fmt.Errorf(errs.MsgUnknownClient)
+	}
+
+	pubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(client.PublicKey))
+	if err != nil {
+		return nil, fmt.Errorf(errs.MsgInvalidClientPublicKey)
+	}
+
+	if err := verifyAssertionSignature(assertion, pubKey); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func validateClientAssertionRequest(r *http.Request) (string, error) {
+	assertionType := r.FormValue("client_assertion_type")
+	if assertionType != "urn:ietf:params:oauth:client-assertion-type:jwt-bearer" {
+		return "", fmt.Errorf(errs.MsgInvalidClientAssertionType)
+	}
+
+	assertion := r.FormValue("client_assertion")
+
+	if assertion == "" {
+		return "", fmt.Errorf(errs.MsgMissingClientAssertion)
+	}
+
+	return assertion, nil
+}
+func parseUnverifiedAssertion(assertion string) (jwt.MapClaims, error) {
+	parser := jwt.Parser{}
+	token, _, err := parser.ParseUnverified(assertion, jwt.MapClaims{})
+	if err != nil {
+		return nil, fmt.Errorf(errs.MsgInvalidJWTAssertion)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, fmt.Errorf(errs.MsgInvalidJWTClaims)
+	}
+
+	return claims, nil
+}
+func validateAssertionClaims(claims jwt.MapClaims, issuer string) (string, error) {
+	iss, _ := claims["iss"].(string)
+	sub, _ := claims["sub"].(string)
+	aud, _ := claims["aud"].(string)
+	if iss == "" || sub == "" {
+		return "", fmt.Errorf(errs.MsgMissingIssSub)
+	}
+
+	if iss != sub {
+		return "", fmt.Errorf(errs.MsgIssSubMismatch)
+	}
+
+	expectedAudience := strings.TrimRight(issuer, "/") + "/oauth/token"
+
+	if aud != expectedAudience {
+		return "", fmt.Errorf(errs.MsgInvalidJWTAudience)
+	}
+
+	expFloat, ok := claims["exp"].(float64)
+
+	if !ok {
+		return "", fmt.Errorf(errs.MsgMissingJWTExp)
+	}
+	if time.Now().Unix() > int64(expFloat) {
+		return "", fmt.Errorf(errs.MsgJWTExpired)
+	}
+
+	return iss, nil
+}
+func verifyAssertionSignature(assertion string, pubKey interface{}) error {
+	token, err := jwt.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
+		if token.Method != jwt.SigningMethodRS256 {
+			return nil, fmt.Errorf(errs.MsgInvalidSigningMethod)
+		}
+		return pubKey, nil
+	},
+	)
+	if err != nil {
+		return fmt.Errorf(errs.MsgJWTVerificationFailed)
+	}
+	if !token.Valid {
+		return fmt.Errorf(errs.MsgInvalidJWT)
+	}
+	return nil
+}
 func issueTokenForGrant(s *store.Store, r *http.Request, grantType string, client *models.Client) (*models.Token, string, error) {
 	switch grantType {
 	case "authorization_code":

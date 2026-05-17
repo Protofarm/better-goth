@@ -58,8 +58,10 @@ func registerHelpRoute(router bettergoth.RouteRegistrar, runtime *bettergoth.Run
 func registerHomeRoute(router bettergoth.RouteRegistrar, homeTemplate *template.Template, runtime *bettergoth.Runtime) {
 	providerLoginPath := "/login/" + providers.OAuthServerProviderName
 	googleLoginPath := ""
-	if runtime.GoogleEnabled {
-		googleLoginPath = "/login/google"
+	if runtime.Auth != nil {
+		if _, ok := runtime.Auth.Providers["google"]; ok {
+			googleLoginPath = "/login/google"
+		}
 	}
 	signupURL := strings.TrimRight(runtime.OAuthIssuer, "/") + "/signup"
 

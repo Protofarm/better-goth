@@ -79,3 +79,21 @@ const (
 	JSONErrInvalidToken            = `{"error":"invalid_token"}`
 	JSONErrUserNotFound            = `{"error":"user_not_found"}`
 )
+
+
+const (
+	MsgInvalidClientAssertionType = "invalid client_assertion_type"
+	MsgMissingClientAssertion     = "missing client_assertion"
+	MsgInvalidJWTAssertion        = "invalid JWT assertion"
+	MsgInvalidJWTClaims           = "invalid JWT claims"
+	MsgMissingIssSub              = "missing iss/sub"
+	MsgIssSubMismatch             = "iss/sub mismatch"
+	MsgInvalidJWTAudience         = "invalid audience"
+	MsgUnknownClient              = "unknown client"
+	MsgInvalidClientPublicKey     = "invalid client public key"
+	MsgInvalidSigningMethod       = "invalid signing method"
+	MsgJWTVerificationFailed      = "JWT verification failed"
+	MsgInvalidJWT                 = "invalid JWT"
+	MsgMissingJWTExp              = "missing exp"
+	MsgJWTExpired                 = "JWT expired"
+)

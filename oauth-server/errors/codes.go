@@ -2,12 +2,13 @@ package errors
 
 // OAuth 2.0 Error Codes (RFC 6749)
 const (
-	CodeInvalidRequest       = "invalid_request"
-	CodeInvalidClient        = "invalid_client"
-	CodeInvalidGrant         = "invalid_grant"
-	CodeInvalidScope         = "invalid_scope"
-	CodeUnsupportedGrantType = "unsupported_grant_type"
-	CodeServerError          = "server_error"
+	CodeInvalidRequest          = "invalid_request"
+	CodeInvalidClient           = "invalid_client"
+	CodeInvalidGrant            = "invalid_grant"
+	CodeInvalidScope            = "invalid_scope"
+	CodeUnsupportedResponseType = "unsupported_response_type"
+	CodeUnsupportedGrantType    = "unsupported_grant_type"
+	CodeServerError             = "server_error"
 )
 
 const (

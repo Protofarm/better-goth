@@ -37,18 +37,19 @@ func ParseURL(raw string) (URL, error) {
 }
 
 type User struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	Password  string `json:"-"` // never serialised
-	Email     string `json:"email"`
-	Name      string `json:"name"`
-	AvatarURL URL    `json:"avatar_url"`
+	ID            string `json:"id"`
+	Username      string `json:"username"`
+	Password      string `json:"-"` // never serialised
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
+	AvatarURL     URL    `json:"avatar_url"`
 }
 
 type Client struct {
 	ClientID     string
 	ClientSecret string
-	PublicKey string
+	PublicKey    string
 	RedirectURIs []string
 	Scopes       []string
 }
@@ -60,19 +61,21 @@ type AuthCode struct {
 	RedirectURI         string
 	Scope               string
 	Nonce               string
+	AuthenticatedAt     time.Time
 	ExpiresAt           time.Time
 	CodeChallenge       string // PKCE
 	CodeChallengeMethod string // "S256" or "plain"
 }
 
 type Token struct {
-	AccessToken  string
-	RefreshToken string
-	TokenType    string
-	ExpiresIn    int
-	Scope        string
-	Nonce        string
-	UserID       string
-	ClientID     string
-	ExpiresAt    time.Time
+	AccessToken     string
+	RefreshToken    string
+	TokenType       string
+	ExpiresIn       int
+	Scope           string
+	Nonce           string
+	UserID          string
+	ClientID        string
+	AuthenticatedAt time.Time
+	ExpiresAt       time.Time
 }

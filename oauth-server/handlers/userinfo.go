@@ -25,13 +25,13 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 		if userID == "" {
 			authHeader := r.Header.Get("Authorization")
 			if !strings.HasPrefix(authHeader, "Bearer ") {
-				errs.HTTPError(w, errs.JSONErrUnauthorized, http.StatusUnauthorized)
+				errs.WriteError(w, http.StatusUnauthorized, errs.CodeMissingToken, errs.ResourceErrorMessages[errs.CodeMissingToken])
 				return
 			}
 			raw := strings.TrimPrefix(authHeader, "Bearer ")
 			tok, err := s.GetByAccessToken(raw)
 			if err != nil || time.Now().After(tok.ExpiresAt) {
-				errs.HTTPError(w, errs.JSONErrInvalidToken, http.StatusUnauthorized)
+				errs.WriteError(w, http.StatusUnauthorized, errs.CodeInvalidToken, errs.ResourceErrorMessages[errs.CodeInvalidToken])
 				return
 			}
 			userID = tok.UserID
@@ -45,11 +45,11 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"sub":        user.ID,
-			"name":       user.Name,
-			"email":      user.Email,
-			"picture":    user.AvatarURL, // OIDC standard field name
-			"avatar_url": user.AvatarURL, // also expose as avatar_url
+			"sub":            user.ID,
+			"name":           user.Name,
+			"email":          user.Email,
+			"email_verified": user.EmailVerified,
+			"picture":        user.AvatarURL,
 		}); err != nil {
 			log.Printf("failed to write userinfo response: %v", err)
 		}

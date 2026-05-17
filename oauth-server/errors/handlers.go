@@ -16,8 +16,18 @@ const (
 // TokenError writes an OAuth 2.0 error response for the token endpoint
 // RFC 6749 Section 5.2: Error Response
 func TokenError(w http.ResponseWriter, errCode, desc string) {
+	OAuthError(w, http.StatusBadRequest, errCode, desc)
+}
+
+// InvalidClientError writes an OAuth client authentication error response.
+func InvalidClientError(w http.ResponseWriter, desc string) {
+	OAuthError(w, http.StatusUnauthorized, CodeInvalidClient, desc)
+}
+
+// OAuthError writes an OAuth 2.0 JSON error response.
+func OAuthError(w http.ResponseWriter, status int, errCode, desc string) {
 	w.Header().Set(contentTypeHeader, applicationJSON)
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{
 		"error":             errCode,
 		"error_description": desc,

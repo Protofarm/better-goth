@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/google/uuid"
@@ -11,14 +12,15 @@ import (
 )
 
 type Store struct {
-	mu      sync.RWMutex
-	users   map[string]*models.User
-	byName  map[string]*models.User
-	byEmail map[string]*models.User
-	clients map[string]*models.Client
-	codes   map[string]*models.AuthCode
-	tokens  map[string]*models.Token
-	refresh map[string]*models.Token
+	mu         sync.RWMutex
+	users      map[string]*models.User
+	byName     map[string]*models.User
+	byEmail    map[string]*models.User
+	clients    map[string]*models.Client
+	codes      map[string]*models.AuthCode
+	tokens     map[string]*models.Token
+	refresh    map[string]*models.Token
+	assertions map[string]time.Time
 }
 
 type Config struct {
@@ -30,13 +32,14 @@ type Config struct {
 
 func NewStore(cfg Config) *Store {
 	s := &Store{
-		users:   make(map[string]*models.User),
-		byName:  make(map[string]*models.User),
-		byEmail: make(map[string]*models.User),
-		clients: make(map[string]*models.Client),
-		codes:   make(map[string]*models.AuthCode),
-		tokens:  make(map[string]*models.Token),
-		refresh: make(map[string]*models.Token),
+		users:      make(map[string]*models.User),
+		byName:     make(map[string]*models.User),
+		byEmail:    make(map[string]*models.User),
+		clients:    make(map[string]*models.Client),
+		codes:      make(map[string]*models.AuthCode),
+		tokens:     make(map[string]*models.Token),
+		refresh:    make(map[string]*models.Token),
+		assertions: make(map[string]time.Time),
 	}
 	s.seed(cfg)
 	return s
@@ -220,4 +223,28 @@ func (s *Store) RevokeRefreshToken(token string) {
 		delete(s.tokens, t.AccessToken)
 	}
 	delete(s.refresh, token)
+}
+
+func (s *Store) RegisterAssertion(clientID, jwtID string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for key, exp := range s.assertions {
+		if !exp.After(now) {
+			delete(s.assertions, key)
+		}
+	}
+
+	if !expiresAt.After(now) {
+		return errors.New("assertion expired")
+	}
+
+	key := clientID + "\x00" + jwtID
+	if exp, ok := s.assertions[key]; ok && exp.After(now) {
+		return errors.New("assertion replayed")
+	}
+
+	s.assertions[key] = expiresAt
+	return nil
 }

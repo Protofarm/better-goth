@@ -2,9 +2,10 @@ package errors
 
 // Authorization endpoint error messages
 const (
-	MsgStateRequired         = "state parameter is required"
-	MsgCodeChallengeRequired = "code_challenge parameter is required (PKCE is mandatory per OAuth 2.1)"
-	MsgOnlyS256Allowed       = "only S256 code_challenge_method is allowed"
+	MsgStateRequired           = "state parameter is required"
+	MsgCodeChallengeRequired   = "code_challenge parameter is required (PKCE is mandatory per OAuth 2.1)"
+	MsgOnlyS256Allowed         = "only S256 code_challenge_method is allowed"
+	MsgUnsupportedResponseType = "response_type must be 'code'"
 )
 
 // Token endpoint error messages
@@ -23,6 +24,7 @@ const (
 	MsgCodeVerifierRequired = "code_verifier is required"
 	MsgS256OnlyErrorMsg     = "only S256 code_challenge_method is allowed"
 	MsgVerifierMismatch     = "code_verifier does not match code_challenge"
+	MsgInvalidCodeVerifier  = "code_verifier must be 43-128 characters and use only unreserved URI characters"
 )
 
 // Authorization code error messages
@@ -80,7 +82,6 @@ const (
 	JSONErrUserNotFound            = `{"error":"user_not_found"}`
 )
 
-
 const (
 	MsgInvalidClientAssertionType = "invalid client_assertion_type"
 	MsgMissingClientAssertion     = "missing client_assertion"
@@ -96,4 +97,6 @@ const (
 	MsgInvalidJWT                 = "invalid JWT"
 	MsgMissingJWTExp              = "missing exp"
 	MsgJWTExpired                 = "JWT expired"
+	MsgMissingJWTID               = "missing jti"
+	MsgJWTReplayDetected          = "JWT replay detected"
 )

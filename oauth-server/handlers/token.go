@@ -35,12 +35,12 @@ func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.Handl
 			return
 		}
 
-		clientID, ok := authenticateTokenClient(w, r, s)
+		client, ok := authenticateTokenClient(w, r, s)
 		if !ok {
 			return
 		}
 
-		tok, errCode, err := issueTokenForGrant(s, r, grantType, clientID)
+		tok, errCode, err := issueTokenForGrant(s, r, grantType, client)
 		if err != nil {
 			errs.TokenError(w, errCode, err.Error())
 			return
@@ -66,34 +66,31 @@ func parseGrantType(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return grantType, true
 }
 
-func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store) (string, bool) {
+func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store) (*models.Client, bool) {
 	clientID, clientSecret := extractClientCredentials(r)
 	if clientID == "" {
 		errs.TokenError(w, errs.CodeInvalidRequest, errs.MsgClientIDRequired)
-		return "", false
+		return nil, false
 	}
 
 	client, err := s.GetClient(clientID)
 	if err != nil || client.ClientSecret != clientSecret {
 		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
 		errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
-		return "", false
+		return nil, false
 	}
 
-	return clientID, true
+	return client, true
 }
 
-func issueTokenForGrant(s *store.Store, r *http.Request, grantType, clientID string) (*models.Token, string, error) {
+func issueTokenForGrant(s *store.Store, r *http.Request, grantType string, client *models.Client) (*models.Token, string, error) {
 	switch grantType {
 	case "authorization_code":
-		tok, err := handleAuthorizationCode(s, r, clientID)
-		return tok, errs.CodeInvalidGrant, err
+		return handleAuthorizationCode(s, r, client)
 	case "refresh_token":
-		tok, err := handleRefreshToken(s, r)
-		return tok, errs.CodeInvalidGrant, err
+		return handleRefreshToken(s, r)
 	case "client_credentials":
-		tok, err := handleClientCredentials(clientID)
-		return tok, errs.CodeInvalidGrant, err
+		return handleClientCredentials(client, r.FormValue("scope"))
 	default:
 		return nil, errs.CodeUnsupportedGrantType, fmt.Errorf("grant_type %q is not supported", grantType)
 	}
@@ -132,7 +129,7 @@ func writeTokenResponse(w http.ResponseWriter, s *store.Store, tok *models.Token
 }
 
 func shouldIncludeIDToken(tok *models.Token, grantType string) bool {
-	return strings.Contains(tok.Scope, "openid") || grantType == "authorization_code"
+	return grantType == "authorization_code" && scopeIncludes(tok.Scope, "openid")
 }
 
 func writeTokenResponseHeaders(w http.ResponseWriter) {
@@ -145,78 +142,94 @@ func writeTokenResponseHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 }
 
-func handleAuthorizationCode(s *store.Store, r *http.Request, clientID string) (*models.Token, error) {
+func handleAuthorizationCode(s *store.Store, r *http.Request, client *models.Client) (*models.Token, string, error) {
 	code := r.FormValue("code")
 	redirectURI := r.FormValue("redirect_uri")
 	verifier := r.FormValue("code_verifier")
 
 	// RFC 6749 Section 4.1.3: code parameter is required
 	if code == "" {
-		return nil, fmt.Errorf(errs.MsgCodeParamRequired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgCodeParamRequired)
 	}
 
 	authCode, err := s.PopCode(code) // also deletes it (single-use)
 	if err != nil {
-		return nil, fmt.Errorf(errs.MsgInvalidAuthCode)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgInvalidAuthCode)
 	}
 	if time.Now().After(authCode.ExpiresAt) {
-		return nil, fmt.Errorf(errs.MsgAuthCodeExpired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgAuthCodeExpired)
 	}
-	if authCode.ClientID != clientID {
-		return nil, fmt.Errorf(errs.MsgCodeClientMismatch)
+	if authCode.ClientID != client.ClientID {
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgCodeClientMismatch)
 	}
 	if authCode.RedirectURI != redirectURI {
-		return nil, fmt.Errorf(errs.MsgRedirectURIMismatch)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgRedirectURIMismatch)
 	}
 	if authCode.CodeChallenge == "" {
-		return nil, fmt.Errorf(errs.MsgPkceRequired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgPkceRequired)
 	}
 
 	if verifier == "" {
-		return nil, fmt.Errorf(errs.MsgCodeVerifierRequired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgCodeVerifierRequired)
 	}
 
 	if authCode.CodeChallengeMethod != "S256" {
-		return nil, fmt.Errorf(errs.MsgS256OnlyErrorMsg)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgS256OnlyErrorMsg)
 	}
 
 	if !verifyPKCE(authCode.CodeChallenge, verifier) {
-		return nil, fmt.Errorf(errs.MsgVerifierMismatch)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgVerifierMismatch)
 	}
 
-	tok := newToken(authCode.UserID, clientID, authCode.Scope)
+	scope, err := resolveRequestedScope(r.FormValue("scope"), strings.Fields(authCode.Scope), authCode.Scope)
+	if err != nil {
+		return nil, errs.CodeInvalidScope, err
+	}
+
+	tok := newToken(authCode.UserID, client.ClientID, scope)
 	tok.Nonce = authCode.Nonce
-	return tok, nil
+	return tok, "", nil
 }
 
-func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, error) {
+func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, string, error) {
 	refreshToken := r.FormValue("refresh_token")
 	if refreshToken == "" {
-		return nil, fmt.Errorf(errs.MsgRefreshTokenParamRequired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgRefreshTokenParamRequired)
 	}
 
 	old, err := s.GetByRefreshToken(refreshToken)
 	if err != nil {
-		return nil, fmt.Errorf(errs.MsgInvalidRefreshToken)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgInvalidRefreshToken)
 	}
 
 	if time.Now().After(old.ExpiresAt) {
-		return nil, fmt.Errorf(errs.MsgRefreshTokenExpired)
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgRefreshTokenExpired)
 	}
+
+	scope, err := resolveRequestedScope(r.FormValue("scope"), strings.Fields(old.Scope), old.Scope)
+	if err != nil {
+		return nil, errs.CodeInvalidScope, err
+	}
+
 	//revoke old refresh token
 	s.RevokeRefreshToken(refreshToken)
 
 	// RFC 6749 Section 6: Refresh token rotation (implicit revocation of old token)
 	// Generate new token pair
-	tok := newToken(old.UserID, old.ClientID, old.Scope)
+	tok := newToken(old.UserID, old.ClientID, scope)
 	tok.Nonce = old.Nonce
-	return tok, nil
+	return tok, "", nil
 }
 
-func handleClientCredentials(clientID string) (*models.Token, error) {
-	t := newToken(clientID, clientID, "read")
+func handleClientCredentials(client *models.Client, requestedScope string) (*models.Token, string, error) {
+	scope, err := resolveRequestedScope(requestedScope, client.Scopes, strings.Join(client.Scopes, " "))
+	if err != nil {
+		return nil, errs.CodeInvalidScope, err
+	}
+
+	t := newToken(client.ClientID, client.ClientID, scope)
 	t.RefreshToken = "" // not issued for client_credentials
-	return t, nil
+	return t, "", nil
 }
 
 func newToken(userID, clientID, scope string) *models.Token {

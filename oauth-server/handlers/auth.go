@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
@@ -59,7 +60,7 @@ func readAuthorizeRequest(r *http.Request) authorizeRequest {
 		ClientID:            q.Get("client_id"),
 		RedirectURI:         q.Get("redirect_uri"),
 		State:               q.Get("state"),
-		Scope:               q.Get("scope"),
+		Scope:               normalizeScope(q.Get("scope")),
 		ResponseType:        q.Get("response_type"),
 		Nonce:               q.Get("nonce"),
 		CodeChallenge:       q.Get("code_challenge"),
@@ -81,6 +82,11 @@ func validateAuthorizeRequest(w http.ResponseWriter, r *http.Request, s *store.S
 
 	if !isValidRedirect(client.RedirectURIs, req.RedirectURI, devMode) {
 		errs.HTTPError(w, errs.JSONErrInvalidRedirectURI, http.StatusBadRequest)
+		return false
+	}
+
+	if err := validateRequestedScope(req.Scope, client.Scopes); err != nil {
+		errs.RedirectError(w, r, req.RedirectURI, errs.CodeInvalidScope, err.Error(), req.State)
 		return false
 	}
 
@@ -233,7 +239,7 @@ func isValidRedirect(allowed []string, uri string, devMode bool) bool {
 	}
 
 	for _, a := range allowed {
-		if a == uri {
+		if strings.TrimSpace(a) == uri {
 			return true
 		}
 	}

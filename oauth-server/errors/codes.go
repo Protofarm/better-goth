@@ -5,6 +5,7 @@ const (
 	CodeInvalidRequest       = "invalid_request"
 	CodeInvalidClient        = "invalid_client"
 	CodeInvalidGrant         = "invalid_grant"
+	CodeInvalidScope         = "invalid_scope"
 	CodeUnsupportedGrantType = "unsupported_grant_type"
 	CodeServerError          = "server_error"
 )

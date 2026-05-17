@@ -14,6 +14,7 @@ const (
 	MsgGrantTypeRequired = "grant_type parameter is required"
 	MsgClientIDRequired  = "client_id is required"
 	MsgClientAuthFailed  = "client authentication failed"
+	MsgInvalidScope      = "requested scope is invalid, unknown, or malformed"
 )
 
 // PKCE error messages

@@ -69,6 +69,11 @@ func readAuthorizeRequest(r *http.Request) authorizeRequest {
 }
 
 func validateAuthorizeRequest(w http.ResponseWriter, r *http.Request, s *store.Store, req authorizeRequest, devMode bool) bool {
+	if req.ResponseType != "code" {
+		errs.HTTPError(w, errs.JSONErrUnsupportedResponseType, http.StatusBadRequest)
+		return false
+	}
+
 	client, err := s.GetClient(req.ClientID)
 	if err != nil {
 		errs.HTTPError(w, errs.JSONErrInvalidClient, http.StatusBadRequest)
@@ -77,11 +82,6 @@ func validateAuthorizeRequest(w http.ResponseWriter, r *http.Request, s *store.S
 
 	if !isValidRedirect(client.RedirectURIs, req.RedirectURI, devMode) {
 		errs.HTTPError(w, errs.JSONErrInvalidRedirectURI, http.StatusBadRequest)
-		return false
-	}
-
-	if req.ResponseType != "code" {
-		errs.RedirectError(w, r, req.RedirectURI, errs.CodeUnsupportedResponseType, errs.MsgUnsupportedResponseType, req.State)
 		return false
 	}
 
@@ -172,7 +172,6 @@ func redirectAuthorizedUser(w http.ResponseWriter, r *http.Request, s *store.Sto
 		RedirectURI:         req.RedirectURI,
 		Scope:               req.Scope,
 		Nonce:               req.Nonce,
-		AuthenticatedAt:     time.Now(),
 		ExpiresAt:           time.Now().Add(5 * time.Minute),
 		CodeChallenge:       req.CodeChallenge,
 		CodeChallengeMethod: req.CodeChallengeMethod,

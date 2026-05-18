@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -19,8 +18,6 @@ import (
 	"github.com/Protofarm/better-goth/oauth-server/models"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
-
-var codeVerifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 
 func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +72,7 @@ func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.St
 	if r.FormValue("client_assertion") != "" {
 		client, err := authenticatePrivateKeyJWT(r, s, issuer)
 		if err != nil {
-			errs.InvalidClientError(w, err.Error())
+			errs.TokenError(w, errs.CodeInvalidClient, err.Error())
 			return nil, false
 		}
 
@@ -93,7 +90,7 @@ func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.St
 	client, err := s.GetClient(clientID)
 	if err != nil || client.ClientSecret != clientSecret {
 		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
-		errs.InvalidClientError(w, errs.MsgClientAuthFailed)
+		errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
 		return nil, false
 	}
 
@@ -110,12 +107,12 @@ func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (
 		return nil, err
 	}
 
-	details, err := validateAssertionClaims(claims, issuer)
+	clientID, err := validateAssertionClaims(claims, issuer)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := s.GetClient(details.ClientID)
+	client, err := s.GetClient(clientID)
 	if err != nil {
 		return nil, fmt.Errorf(errs.MsgUnknownClient)
 	}
@@ -127,10 +124,6 @@ func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (
 
 	if err := verifyAssertionSignature(assertion, pubKey); err != nil {
 		return nil, err
-	}
-
-	if err := s.RegisterAssertion(details.ClientID, details.JWTID, details.ExpiresAt); err != nil {
-		return nil, fmt.Errorf(errs.MsgJWTReplayDetected)
 	}
 
 	return client, nil
@@ -163,91 +156,34 @@ func parseUnverifiedAssertion(assertion string) (jwt.MapClaims, error) {
 
 	return claims, nil
 }
-
-type assertionDetails struct {
-	ClientID  string
-	JWTID     string
-	ExpiresAt time.Time
-}
-
-func validateAssertionClaims(claims jwt.MapClaims, issuer string) (assertionDetails, error) {
+func validateAssertionClaims(claims jwt.MapClaims, issuer string) (string, error) {
 	iss, _ := claims["iss"].(string)
 	sub, _ := claims["sub"].(string)
+	aud, _ := claims["aud"].(string)
 	if iss == "" || sub == "" {
-		return assertionDetails{}, fmt.Errorf(errs.MsgMissingIssSub)
+		return "", fmt.Errorf(errs.MsgMissingIssSub)
 	}
 
 	if iss != sub {
-		return assertionDetails{}, fmt.Errorf(errs.MsgIssSubMismatch)
+		return "", fmt.Errorf(errs.MsgIssSubMismatch)
 	}
 
 	expectedAudience := strings.TrimRight(issuer, "/") + "/oauth/token"
-	if !claimAudienceContains(claims["aud"], expectedAudience) {
-		return assertionDetails{}, fmt.Errorf(errs.MsgInvalidJWTAudience)
+
+	if aud != expectedAudience {
+		return "", fmt.Errorf(errs.MsgInvalidJWTAudience)
 	}
 
-	expUnix, ok := numericClaimInt64(claims["exp"])
+	expFloat, ok := claims["exp"].(float64)
+
 	if !ok {
-		return assertionDetails{}, fmt.Errorf(errs.MsgMissingJWTExp)
+		return "", fmt.Errorf(errs.MsgMissingJWTExp)
+	}
+	if time.Now().Unix() > int64(expFloat) {
+		return "", fmt.Errorf(errs.MsgJWTExpired)
 	}
 
-	expiresAt := time.Unix(expUnix, 0)
-	if time.Now().After(expiresAt) {
-		return assertionDetails{}, fmt.Errorf(errs.MsgJWTExpired)
-	}
-
-	jwtID, _ := claims["jti"].(string)
-	if strings.TrimSpace(jwtID) == "" {
-		return assertionDetails{}, fmt.Errorf(errs.MsgMissingJWTID)
-	}
-
-	return assertionDetails{
-		ClientID:  iss,
-		JWTID:     jwtID,
-		ExpiresAt: expiresAt,
-	}, nil
-}
-
-func claimAudienceContains(value interface{}, expected string) bool {
-	switch aud := value.(type) {
-	case string:
-		return aud == expected
-	case []string:
-		for _, entry := range aud {
-			if entry == expected {
-				return true
-			}
-		}
-	case []interface{}:
-		for _, entry := range aud {
-			entryString, ok := entry.(string)
-			if ok && entryString == expected {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func numericClaimInt64(value interface{}) (int64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return int64(v), true
-	case float32:
-		return int64(v), true
-	case int64:
-		return v, true
-	case int32:
-		return int64(v), true
-	case int:
-		return int64(v), true
-	case json.Number:
-		n, err := v.Int64()
-		return n, err == nil
-	default:
-		return 0, false
-	}
+	return iss, nil
 }
 func verifyAssertionSignature(assertion string, pubKey interface{}) error {
 	token, err := jwt.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
@@ -291,15 +227,11 @@ func signAndStoreToken(s *store.Store, tok *models.Token, keyInfo keys.KeyInfo, 
 
 func writeTokenResponse(w http.ResponseWriter, s *store.Store, tok *models.Token, keyInfo keys.KeyInfo, issuer, grantType string) {
 	resp := map[string]interface{}{
-		"access_token": tok.AccessToken,
-		"token_type":   "Bearer",
-		"expires_in":   tok.ExpiresIn,
-	}
-	if tok.RefreshToken != "" {
-		resp["refresh_token"] = tok.RefreshToken
-	}
-	if tok.Scope != "" {
-		resp["scope"] = tok.Scope
+		"access_token":  tok.AccessToken,
+		"token_type":    "Bearer",
+		"expires_in":    tok.ExpiresIn,
+		"refresh_token": tok.RefreshToken,
+		"scope":         tok.Scope,
 	}
 
 	if shouldIncludeIDToken(tok, grantType) {
@@ -358,9 +290,6 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, client *models.Cli
 	if verifier == "" {
 		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgCodeVerifierRequired)
 	}
-	if !codeVerifierPattern.MatchString(verifier) {
-		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgInvalidCodeVerifier)
-	}
 
 	if authCode.CodeChallengeMethod != "S256" {
 		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgS256OnlyErrorMsg)
@@ -377,7 +306,6 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, client *models.Cli
 
 	tok := newToken(authCode.UserID, client.ClientID, scope)
 	tok.Nonce = authCode.Nonce
-	tok.AuthenticatedAt = authCode.AuthenticatedAt
 	return tok, "", nil
 }
 
@@ -408,7 +336,6 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, string,
 	// Generate new token pair
 	tok := newToken(old.UserID, old.ClientID, scope)
 	tok.Nonce = old.Nonce
-	tok.AuthenticatedAt = old.AuthenticatedAt
 	return tok, "", nil
 }
 
@@ -429,15 +356,14 @@ func newToken(userID, clientID, scope string) *models.Token {
 		panic(fmt.Sprintf("failed to generate random token bytes: %v", err))
 	}
 	return &models.Token{
-		AccessToken:     hex.EncodeToString(b), // overwritten by JWT after signing
-		RefreshToken:    hex.EncodeToString(b[:16]),
-		TokenType:       "Bearer",
-		ExpiresIn:       3600,
-		Scope:           scope,
-		UserID:          userID,
-		ClientID:        clientID,
-		AuthenticatedAt: time.Time{},
-		ExpiresAt:       time.Now().Add(time.Hour),
+		AccessToken:  hex.EncodeToString(b), // overwritten by JWT after signing
+		RefreshToken: hex.EncodeToString(b[:16]),
+		TokenType:    "Bearer",
+		ExpiresIn:    3600,
+		Scope:        scope,
+		UserID:       userID,
+		ClientID:     clientID,
+		ExpiresAt:    time.Now().Add(time.Hour),
 	}
 }
 
@@ -500,11 +426,11 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 		"iat":            now.Unix(),
 		"exp":            now.Add(time.Duration(tok.ExpiresIn) * time.Second).Unix(),
 		"token_use":      "id",
-		"auth_time":      authTimeUnix(tok, now),
+		"auth_time":      now.Unix(),
 		"azp":            tok.ClientID,
 		"picture":        user.AvatarURL,
 		"email":          user.Email,
-		"email_verified": user.EmailVerified,
+		"email_verified": false,
 		"name":           user.Name,
 		"given_name":     givenName,
 		"at_hash":        atHash,
@@ -515,15 +441,11 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 		claims["nonce"] = tok.Nonce
 	}
 
+	if user.Email != "" {
+		claims["email_verified"] = true
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = keyInfo.Kid
 	return token.SignedString(keyInfo.GetPrivateKey())
-}
-
-func authTimeUnix(tok *models.Token, issuedAt time.Time) int64 {
-	if tok.AuthenticatedAt.IsZero() {
-		return issuedAt.Unix()
-	}
-
-	return tok.AuthenticatedAt.Unix()
 }

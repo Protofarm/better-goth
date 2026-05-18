@@ -41,15 +41,13 @@ func IntrospectionHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc 
 func authenticateIntrospectionClient(w http.ResponseWriter, r *http.Request, s *store.Store) (string, bool) {
 	clientID, clientSecret := extractClientCredentials(r)
 	if clientID == "" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
-		errs.InvalidClientError(w, errs.MsgClientAuthFailed)
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 		return "", false
 	}
 
 	client, err := s.GetClient(clientID)
 	if err != nil || client.ClientSecret != clientSecret {
-		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
-		errs.InvalidClientError(w, errs.MsgClientAuthFailed)
+		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 		return "", false
 	}
 

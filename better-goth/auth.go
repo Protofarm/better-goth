@@ -168,7 +168,7 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.setFlowCookie(w, oauthStateCookieName, state, authFlowCookieMaxAge)
+	a.setFlowCookie(w, oauthStateCookieName, state, 0)
 	a.setFlowCookie(w, oauthVerifierCookieName, codeVerifier, authFlowCookieMaxAge)
 	a.setFlowCookie(w, oauthNonceCookieName, nonce, authFlowCookieMaxAge)
 
@@ -203,10 +203,9 @@ func exchangeWithPKCE(ctx context.Context, cfg *oauth2.Config, code, codeVerifie
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {cfg.RedirectURL},
+		"client_id":     {cfg.ClientID},
+		"client_secret": {cfg.ClientSecret},
 		"code_verifier": {codeVerifier},
-	}
-	if strings.TrimSpace(cfg.ClientSecret) == "" {
-		values.Set("client_id", cfg.ClientID)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.Endpoint.TokenURL, strings.NewReader(values.Encode()))
@@ -216,9 +215,6 @@ func exchangeWithPKCE(ctx context.Context, cfg *oauth2.Config, code, codeVerifie
 
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "golang/oauth2")
-	if strings.TrimSpace(cfg.ClientSecret) != "" {
-		req.SetBasicAuth(cfg.ClientID, cfg.ClientSecret)
-	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -375,15 +371,6 @@ func (a *Auth) resolveCallbackProvider(w http.ResponseWriter, r *http.Request) (
 }
 
 func parseCallbackRequest(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	if oauthError := r.URL.Query().Get("error"); oauthError != "" {
-		message := oauthError
-		if description := r.URL.Query().Get("error_description"); description != "" {
-			message += ": " + description
-		}
-		http.Error(w, message, http.StatusBadRequest)
-		return "", "", false
-	}
-
 	state := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -457,8 +444,7 @@ func verifyCallbackIdentity(w http.ResponseWriter, r *http.Request, provider Pro
 func validateNonceClaim(w http.ResponseWriter, r *http.Request, claims map[string]interface{}) bool {
 	nonceCookie, err := r.Cookie(oauthNonceCookieName)
 	if err != nil {
-		http.Error(w, "nonce cookie missing", http.StatusBadRequest)
-		return false
+		return true
 	}
 
 	if claimString(claims, "nonce") != nonceCookie.Value {

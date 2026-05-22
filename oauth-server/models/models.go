@@ -48,7 +48,7 @@ type User struct {
 type Client struct {
 	ClientID     string
 	ClientSecret string
-	PublicKey string
+	PublicKey    string
 	RedirectURIs []string
 	Scopes       []string
 }

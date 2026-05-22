@@ -80,7 +80,6 @@ const (
 	JSONErrUserNotFound            = `{"error":"user_not_found"}`
 )
 
-
 const (
 	MsgInvalidClientAssertionType = "invalid client_assertion_type"
 	MsgMissingClientAssertion     = "missing client_assertion"

@@ -1,4 +1,5 @@
-<img width="970" height="110" alt="better-goth-banner" src="https://github.com/user-attachments/assets/9734aace-9180-4526-baea-ba235731d24b" />
+<img width="970" height="110" alt="better-goth-banner" src="https://github.com/user-attachments/assets/cced2ee6-b2f9-4f56-b6bb-a01abbb151f4" />
+
 
 <div align="center">
   <a href="https://github.com/Protofarm/better-goth/stargazers" target="_blank">

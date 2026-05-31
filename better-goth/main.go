@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Protofarm/better-goth/database"
 	oauthserver "github.com/Protofarm/better-goth/oauth-server"
 	"github.com/Protofarm/better-goth/pb"
 	"github.com/Protofarm/better-goth/providers"
@@ -59,6 +60,7 @@ type setupContext struct {
 	configDir string
 	cfg       *yamlconfig.Config
 	runtime   runtimeConfig
+	db        *database.Instance
 }
 
 // Runtime exposes the configured auth runtime so callers can register their own routes.
@@ -112,9 +114,15 @@ func newSetupContext(configPath string) (*setupContext, error) {
 		return nil, err
 	}
 
+	db, err := database.InitDB(cfg.Storage.Type, cfg.Storage.ConnectionString)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx := &setupContext{
 		configDir: filepath.Dir(configPath),
 		cfg:       cfg,
+		db:        db,
 	}
 	ctx.runtime = ctx.buildRuntimeConfig()
 	return ctx, nil
@@ -239,7 +247,7 @@ func (ctx *setupContext) startOAuthServer() error {
 		return nil
 	}
 
-	oauthServer, err := oauthserver.CreateOAuthServer(oauthserver.ServerConfig{
+	oauthServer, err := oauthserver.CreateOAuthServer(ctx.db, oauthserver.ServerConfig{
 		Port:         rc.OAuthPort,
 		IssuerURL:    rc.OAuthIssuer,
 		KeyDir:       rc.OAuthKeyDir,
@@ -268,7 +276,7 @@ func (ctx *setupContext) startOAuthServer() error {
 
 func (ctx *setupContext) newAuth() (*Auth, error) {
 	rc := ctx.runtime
-	auth, err := NewAuth([]byte(rc.JWTSecret))
+	auth, err := NewAuth([]byte(rc.JWTSecret), ctx.db)
 	if err != nil {
 		return nil, err
 	}
@@ -370,6 +378,7 @@ type TokenRecord struct {
 	ExpiresAt    string `json:"expires_at"`
 }
 
+// TODO: convert to use db
 type TokenStore struct {
 	mu   sync.RWMutex
 	data map[string]TokenRecord

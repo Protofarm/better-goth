@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Protofarm/better-goth/database"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -22,7 +23,7 @@ const (
 func newTestAuth(t *testing.T) *Auth {
 	t.Helper()
 
-	auth, err := NewAuth([]byte("12345678901234567890123456789012"))
+	auth, err := NewAuth([]byte("12345678901234567890123456789012"), &database.Instance{})
 	if err != nil {
 		t.Fatalf(newAuthErrorMsg, err)
 	}
@@ -41,7 +42,7 @@ func createValidToken(t *testing.T, auth *Auth) string {
 
 func createWrongSecretToken(t *testing.T) string {
 	t.Helper()
-	wrongSecretAuth, err := NewAuth([]byte("abcdefghijklmnopqrstuvwxyz123456"))
+	wrongSecretAuth, err := NewAuth([]byte("abcdefghijklmnopqrstuvwxyz123456"), &database.Instance{})
 	if err != nil {
 		t.Fatalf(newAuthErrorMsg, err)
 	}

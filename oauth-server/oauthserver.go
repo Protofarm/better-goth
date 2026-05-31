@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Protofarm/better-goth/database"
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/middleware"
@@ -24,10 +25,10 @@ type ServerConfig struct {
 	DevMode      bool
 }
 
-func CreateOAuthServer(cfg ServerConfig) (*http.ServeMux, error) {
+func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux, error) {
 	privateKM := keys.NewKeyManager(cfg.KeyDir)
 
-	s := store.NewStore(store.Config{
+	s := store.NewStore(db, store.Config{
 		DefaultClientID:     cfg.ClientID,
 		DefaultClientSecret: cfg.ClientSecret,
 		DefaultRedirectURIs: cfg.RedirectURIs,

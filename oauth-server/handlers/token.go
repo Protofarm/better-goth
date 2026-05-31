@@ -428,7 +428,7 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 		"token_use":      "id",
 		"auth_time":      now.Unix(),
 		"azp":            tok.ClientID,
-		"picture":        user.AvatarURL,
+		"picture":        user.Picture,
 		"email":          user.Email,
 		"email_verified": false,
 		"name":           user.Name,
@@ -444,7 +444,6 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 	if user.Email != "" {
 		claims["email_verified"] = true
 	}
-
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = keyInfo.Kid
 	return token.SignedString(keyInfo.GetPrivateKey())

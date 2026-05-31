@@ -39,8 +39,8 @@ func main() {
 
 func defaultConfigPath() string {
 	candidates := []string{
-		"example.config.yaml",
-		filepath.Join("examples", "example.config.yaml"),
+		"config.yaml",
+		filepath.Join("examples", "config.yaml"),
 	}
 
 	for _, candidate := range candidates {

@@ -48,8 +48,8 @@ func UserInfoHandler(s *store.Store) http.HandlerFunc {
 			"sub":        user.ID,
 			"name":       user.Name,
 			"email":      user.Email,
-			"picture":    user.AvatarURL, // OIDC standard field name
-			"avatar_url": user.AvatarURL, // also expose as avatar_url
+			"picture":    user.Picture, // OIDC standard field name
+			"avatar_url": user.Picture, // also expose as avatar_url
 		}); err != nil {
 			log.Printf("failed to write userinfo response: %v", err)
 		}

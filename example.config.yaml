@@ -32,7 +32,7 @@ jwt:
   cookie_name: "session_id"
 
 storage:
-  type: "memory"
+  type: "memory" # memory, mysql, postgres, sqlite
   connection_string: ""
 
 logging:

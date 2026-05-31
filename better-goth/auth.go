@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Protofarm/better-goth/database"
 	"github.com/Protofarm/better-goth/pb"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
@@ -72,6 +73,7 @@ type Auth struct {
 	userHandler       UserHandler
 	authResultHandler AuthResultHandler
 	CookieSecure      bool
+	db                *database.Instance
 }
 
 func (a *Auth) SetUserHandler(h UserHandler) {
@@ -88,7 +90,7 @@ type Provider interface {
 	Verifier() *oidc.IDTokenVerifier
 }
 
-func NewAuth(secret []byte) (*Auth, error) {
+func NewAuth(secret []byte, db *database.Instance) (*Auth, error) {
 	if len(bytes.TrimSpace(secret)) == 0 {
 		return nil, ErrMissingJWTSecret
 	}
@@ -101,6 +103,7 @@ func NewAuth(secret []byte) (*Auth, error) {
 		Providers:    map[string]Provider{},
 		jwtSecret:    append([]byte(nil), secret...),
 		CookieSecure: true,
+		db:           db,
 	}, nil
 }
 
@@ -328,13 +331,15 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signedToken, err := a.signJWT(subject, token.Expiry)
+	pbuser := buildUserFromClaims(claims, subject, "")
+	user := a.db.GetOrCreateUser(pbuser, providerName)
+	signedToken, err := a.signJWT(user.GetSub(), token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)
 		return
 	}
 
-	user := buildUserFromClaims(claims, subject, signedToken)
+	user.Jwt = signedToken
 	if err := a.handleAuthenticatedUser(r.Context(), user); err != nil {
 		http.Error(w, "failed to handle user", http.StatusInternalServerError)
 		return

@@ -1,21 +1,27 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 
+	"github.com/Protofarm/better-goth/database"
 	"github.com/Protofarm/better-goth/oauth-server/models"
+	"github.com/Protofarm/better-goth/providers"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Store struct {
-	mu      sync.RWMutex
-	users   map[string]*models.User
-	byName  map[string]*models.User
-	byEmail map[string]*models.User
+	mu sync.RWMutex
+	db *database.Instance
+
+	// in-memory or DB
 	clients map[string]*models.Client
+
+	// in-memory or cached
 	codes   map[string]*models.AuthCode
 	tokens  map[string]*models.Token
 	refresh map[string]*models.Token
@@ -28,11 +34,9 @@ type Config struct {
 	DevMode             bool
 }
 
-func NewStore(cfg Config) *Store {
+func NewStore(db *database.Instance, cfg Config) *Store {
 	s := &Store{
-		users:   make(map[string]*models.User),
-		byName:  make(map[string]*models.User),
-		byEmail: make(map[string]*models.User),
+		db:      db,
 		clients: make(map[string]*models.Client),
 		codes:   make(map[string]*models.AuthCode),
 		tokens:  make(map[string]*models.Token),
@@ -75,22 +79,20 @@ func (s *Store) seed(cfg Config) {
 		redirectURIs = []string{"http://localhost:3000/callback/oauthserver"}
 	}
 
-	avatar, _ := models.ParseURL("https://avatars.githubusercontent.com/u/1?v=4")
-
 	hashedPassword, _ := hashPassword("secret")
 
 	//example user - in production, store hashed passwords and use a proper user management system
 	u := &models.User{
-		ID:        "user-001",
-		Username:  "john",
-		Password:  hashedPassword,
-		Email:     "john@example.com",
-		Name:      "John Doe",
-		AvatarURL: avatar,
+		ID:           "user-001",
+		Name:         "john",
+		PasswordHash: hashedPassword,
+		Email:        "john@example.com",
+		GivenName:    "John Doe",
+		Picture:      "https://avatars.githubusercontent.com/u/1?v=4",
 	}
-	s.users[u.ID] = u
-	s.byName[u.Username] = u
-	s.byEmail[u.Email] = u
+	if err := s.CreateUser(u); err != nil {
+		log.Printf("Unable to create dummy user: %v", err)
+	}
 
 	s.clients[clientID] = &models.Client{
 		ClientID:     clientID,
@@ -100,27 +102,71 @@ func (s *Store) seed(cfg Config) {
 	}
 }
 
-func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.byName[username]
-	if !ok {
-		return nil, errors.New("invalid credentials")
+func (s *Store) CreateUser(user *models.User) error {
+	user.ID = uuid.New().String()
+	hash, err := hashPassword(user.PasswordHash)
+	user.PasswordHash = hash
+
+	if err := s.db.CreateUser(user); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") ||
+			strings.Contains(err.Error(), "UNIQUE constraint") {
+			if strings.Contains(err.Error(), "name") {
+				return errors.New("username already exists")
+			}
+			if strings.Contains(err.Error(), "email") {
+				return errors.New("email already registered")
+			}
+		}
+		return err
 	}
-	if err := verifyPassword(u.Password, password); err != nil {
+
+	// create oauthuser entry
+	ui := &models.UserIdentity{
+		ID:       uuid.New().String(),
+		UserID:   user.ID,
+		Sub:      user.ID,
+		Provider: providers.OAuthServerProviderName,
+	}
+	if err = s.db.CreateUserIdentity(ui); err != nil {
+		if strings.Contains(err.Error(), "duplicate key") ||
+			strings.Contains(err.Error(), "UNIQUE constraint") {
+			return errors.New("user identity already exists")
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {
+	u, err := s.db.GetUserByName(username)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("User not found")
+		}
+		return nil, err
+	}
+
+	ok := s.db.CheckUserIdentityExists(u.ID)
+	if !ok {
+		return nil, errors.New("invalid login method")
+	}
+
+	if err := verifyPassword(u.PasswordHash, password); err != nil {
 		return nil, errors.New("invalid credentials")
 	}
 	return u, nil
 }
 
 func (s *Store) GetUserByID(id string) (*models.User, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	u, ok := s.users[id]
-	if !ok {
-		return nil, errors.New("user not found")
+	user, err := s.db.GetUserByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("User not found")
+		}
 	}
-	return u, nil
+	return user, nil
 }
 
 func (s *Store) GetClient(id string) (*models.Client, error) {
@@ -186,31 +232,6 @@ func (s *Store) RevokeAccessToken(token string) {
 		delete(s.refresh, t.RefreshToken)
 	}
 	delete(s.tokens, token)
-}
-
-func (s *Store) CreateUser(user *models.User) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	user.ID = uuid.New().String()
-
-	if s.byName[user.Username] != nil {
-		return errors.New("username already exists")
-	}
-
-	if s.byEmail[user.Email] != nil {
-		return errors.New("email already registered")
-	}
-
-	s.users[user.ID] = user
-	s.byName[user.Username] = user
-	s.byEmail[user.Email] = user
-
-	if s.users[user.ID] != nil {
-		return nil
-	}
-
-	return errors.New("unable to create user")
 }
 
 func (s *Store) RevokeRefreshToken(token string) {

@@ -131,10 +131,10 @@ func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authF
 	signupUsername := r.FormValue("signup_username")
 	if signupUsername != "" {
 		user := &models.User{
-			Username: signupUsername,
-			Email:    r.FormValue("signup_email"),
-			Name:     r.FormValue("signup_name"),
-			Password: r.FormValue("signup_password"),
+			Name:         signupUsername,
+			Email:        r.FormValue("signup_email"),
+			GivenName:    r.FormValue("signup_name"),
+			PasswordHash: r.FormValue("signup_password"),
 		}
 		if err := s.CreateUser(user); err != nil {
 			return nil, authFormState{

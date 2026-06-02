@@ -23,8 +23,11 @@ import (
 	"github.com/uptrace/bun/driver/sqliteshim"
 )
 
+type WriteJob func(bun.Tx) error
+
 type Instance struct {
-	DB *bun.DB
+	DB      *bun.DB
+	writeCh chan WriteJob
 }
 
 func InitDB(connType, connStr string) (*Instance, error) {
@@ -53,7 +56,11 @@ func InitDB(connType, connStr string) (*Instance, error) {
 	}
 
 	db := bun.NewDB(sqldb, d)
-	dbin := &Instance{DB: db}
+	dbin := &Instance{
+		DB:      db,
+		writeCh: make(chan WriteJob),
+	}
+	go dbin.runWriter()
 
 	_, err = db.NewCreateTable().Model((*models.User)(nil)).IfNotExists().Exec(ctx)
 	if err != nil {
@@ -74,6 +81,27 @@ func InitDB(connType, connStr string) (*Instance, error) {
 	}
 
 	return dbin, nil
+}
+
+func (db *Instance) runWriter() {
+	for job := range db.writeCh {
+		err := db.DB.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+			return job(tx)
+		})
+		if err != nil {
+			log.Printf("Write job error: %v", err)
+		}
+	}
+}
+
+func (db *Instance) EnqueueWrite(job WriteJob) error {
+	done := make(chan error, 1)
+	db.writeCh <- func(tx bun.Tx) error {
+		err := job(tx)
+		done <- err
+		return err
+	}
+	return <-done
 }
 
 func (db *Instance) CreateUser(user *models.User) error {
@@ -152,19 +180,23 @@ func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) *pb.User {
 			Picture:        pbuser.GetPicture(),
 			EmailConfirmed: pbuser.GetEmailVerified(),
 		}
-		err = db.CreateUser(user)
-		if err != nil {
-			return pbuser
-		}
-	}
 
-	ui := &models.UserIdentity{
-		ID:       uuid.New().String(),
-		UserID:   user.ID,
-		Sub:      pbuser.GetSub(),
-		Provider: provider,
+		db.EnqueueWrite(func(tx bun.Tx) error {
+			_, err := tx.NewInsert().Model(user).Exec(context.Background())
+			if err != nil {
+				return err
+			}
+
+			ui := &models.UserIdentity{
+				ID:       uuid.New().String(),
+				UserID:   user.ID,
+				Sub:      pbuser.GetSub(),
+				Provider: provider,
+			}
+			_, err = tx.NewInsert().Model(ui).Exec(context.Background())
+			return err
+		})
 	}
-	db.CreateUserIdentity(ui)
 
 	return &pb.User{
 		Picture:       user.Picture,

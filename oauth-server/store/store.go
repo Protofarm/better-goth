@@ -78,14 +78,10 @@ func (s *Store) seed(cfg Config) {
 	if len(redirectURIs) == 0 {
 		redirectURIs = []string{"http://localhost:3000/callback/oauthserver"}
 	}
-
-	hashedPassword, _ := hashPassword("secret")
-
-	//example user - in production, store hashed passwords and use a proper user management system
 	u := &models.User{
 		ID:           "user-001",
 		Name:         "john",
-		PasswordHash: hashedPassword,
+		PasswordHash: "secret",
 		Email:        "john@example.com",
 		GivenName:    "John Doe",
 		Picture:      "https://avatars.githubusercontent.com/u/1?v=4",

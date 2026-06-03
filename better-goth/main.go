@@ -16,6 +16,7 @@ import (
 
 	"github.com/Protofarm/better-goth/database"
 	oauthserver "github.com/Protofarm/better-goth/oauth-server"
+	"github.com/Protofarm/better-goth/oauth-server/smtp"
 	"github.com/Protofarm/better-goth/pb"
 	"github.com/Protofarm/better-goth/providers"
 	yamlconfig "github.com/Protofarm/better-goth/yamlconfig"
@@ -48,10 +49,13 @@ type runtimeConfig struct {
 	OAuthKeyDir       string
 	OAuthRedirectURIs []string
 	OAuthRedirectURL  string
-	OAuthAuthHTMLPath string
-	OAuthTLSCertPath  string
+	OAuthAuthHTMLPath        string
+	OAuthVerifyEmailHTMLPath string
+	OAuthTLSCertPath         string
 	OAuthTLSKeyPath   string
 	OAuthTLSEnabled   bool
+
+	SMTP smtp.Config
 
 	ExternalProviders map[string]yamlconfig.ProviderConfig
 }
@@ -206,12 +210,21 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		OAuthClientID:     oauthClientID,
 		OAuthClientSecret: oauthClientSecret,
 		OAuthKeyDir:       ctx.resolveConfigPath(oauthCfg.KeyDir, "keys"),
-		OAuthAuthHTMLPath: ctx.resolveConfigPath(oauthCfg.AuthHTMLPath, filepath.Join("oauth-server", "templates", "auth.html")),
+		OAuthAuthHTMLPath:        ctx.resolveConfigPath(oauthCfg.AuthHTMLPath, filepath.Join("oauth-server", "templates", "auth.html")),
+		OAuthVerifyEmailHTMLPath: ctx.resolveConfigPath(oauthCfg.VerifyEmailHTMLPath, filepath.Join("oauth-server", "templates", "verifyemail.html")),
 		OAuthTLSCertPath:  ctx.resolveConfigPath(oauthCfg.TLS.CertPath, ""),
 		OAuthTLSKeyPath:   ctx.resolveConfigPath(oauthCfg.TLS.KeyPath, ""),
 		OAuthTLSEnabled:   oauthCfg.TLS.Enabled,
 
 		ExternalProviders: cfg.Providers.External,
+
+		SMTP: smtp.Config{
+			Host:     cfg.SMTP.Host,
+			Port:     cfg.SMTP.Port,
+			Username: cfg.SMTP.Username,
+			Password: cfg.SMTP.Password,
+			From:     cfg.SMTP.From,
+		},
 	}
 
 	rc.OAuthRedirectURIs = oauthCfg.RedirectURIs
@@ -254,8 +267,10 @@ func (ctx *setupContext) startOAuthServer() error {
 		ClientID:     rc.OAuthClientID,
 		ClientSecret: rc.OAuthClientSecret,
 		RedirectURIs: rc.OAuthRedirectURIs,
-		AuthHTMLPath: rc.OAuthAuthHTMLPath,
+		AuthHTMLPath:        rc.OAuthAuthHTMLPath,
+		VerifyEmailHTMLPath: rc.OAuthVerifyEmailHTMLPath,
 		DevMode:      rc.DevMode,
+		SMTPConfig:   rc.SMTP,
 	})
 	if err != nil {
 		return err

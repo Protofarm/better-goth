@@ -135,6 +135,10 @@ func (s *Store) CreateUser(user *models.User) error {
 	return nil
 }
 
+func (s *Store) ConfirmUserEmail(userID string) error {
+	return s.db.ConfirmEmailByUserID(userID)
+}
+
 func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {
 	u, err := s.db.GetUserByName(username)
 	if err != nil {

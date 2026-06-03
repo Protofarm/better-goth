@@ -23,15 +23,16 @@ type Config struct {
 
 	Providers struct {
 		OAuthServer struct {
-			Enabled      bool     `yaml:"enabled"`
-			Port         string   `yaml:"port"`
-			IssuerURL    string   `yaml:"issuer_url"`
-			ClientID     string   `yaml:"client_id"`
-			ClientSecret string   `yaml:"client_secret"`
-			KeyDir       string   `yaml:"key_dir"`
-			AuthHTMLPath string   `yaml:"auth_html_path"`
-			RedirectURIs []string `yaml:"redirect_uris"`
-			TLS          struct {
+			Enabled             bool     `yaml:"enabled"`
+			Port                string   `yaml:"port"`
+			IssuerURL           string   `yaml:"issuer_url"`
+			ClientID            string   `yaml:"client_id"`
+			ClientSecret        string   `yaml:"client_secret"`
+			KeyDir              string   `yaml:"key_dir"`
+			AuthHTMLPath        string   `yaml:"auth_html_path"`
+			VerifyEmailHTMLPath string   `yaml:"verifyemail_html_path"`
+			RedirectURIs        []string `yaml:"redirect_uris"`
+			TLS                 struct {
 				Enabled  bool   `yaml:"enabled"`
 				CertPath string `yaml:"cert_path"`
 				KeyPath  string `yaml:"key_path"`
@@ -54,6 +55,14 @@ type Config struct {
 		Level  string `yaml:"level"`
 		Format string `yaml:"format"`
 	} `yaml:"logging"`
+
+	SMTP struct {
+		Host     string `yaml:"host"`
+		Port     string `yaml:"port"`
+		Username string `yaml:"username"`
+		Password string `yaml:"password"`
+		From     string `yaml:"from"`
+	} `yaml:"smtp"`
 }
 
 func LoadConfig(data []byte) (*Config, error) {

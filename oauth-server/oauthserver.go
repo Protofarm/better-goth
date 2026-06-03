@@ -4,25 +4,27 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/Protofarm/better-goth/database"
 	"github.com/Protofarm/better-goth/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/middleware"
+	"github.com/Protofarm/better-goth/oauth-server/smtp"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
 type ServerConfig struct {
-	Port         string
-	IssuerURL    string
-	KeyDir       string
-	ClientID     string
-	ClientSecret string
-	RedirectURIs []string
-	AuthHTMLPath string
-	DevMode      bool
+	Port                string
+	IssuerURL           string
+	KeyDir              string
+	ClientID            string
+	ClientSecret        string
+	RedirectURIs        []string
+	AuthHTMLPath        string
+	VerifyEmailHTMLPath string
+	DevMode             bool
+	SMTPConfig          smtp.Config
 }
 
 func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux, error) {
@@ -37,13 +39,21 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 	requireAuth := middleware.RequireAuth(s, privateKM)
 	mux := http.NewServeMux()
 	authTemplatePath := strings.TrimSpace(cfg.AuthHTMLPath)
+	verifyEmailTemplatePath := strings.TrimSpace(cfg.VerifyEmailHTMLPath)
 	if authTemplatePath == "" {
-		authTemplatePath = filepath.Join(".", "templates", "auth.html")
+		log.Fatal("auth template path is required")
+		return nil, nil
 	}
-	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, cfg.DevMode, authTemplatePath))
+	if verifyEmailTemplatePath == "" {
+		log.Fatal("verify email template path is required")
+		return nil, nil
+	}
+	mailer := smtp.NewMailer(cfg.SMTPConfig)
+	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, cfg.DevMode, authTemplatePath, privateKM, cfg.IssuerURL, mailer))
 	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, cfg.IssuerURL))
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
 	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))
+	mux.HandleFunc("/oauth/verifyEmail", handlers.VerifyEmailHandler(s, privateKM, verifyEmailTemplatePath))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(privateKM))
 	// admin endpoints

@@ -147,6 +147,15 @@ func (db *Instance) CreateUserIdentity(identity *models.UserIdentity) error {
 	return err
 }
 
+func (db *Instance) ConfirmEmailByUserID(userID string) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.User)(nil)).
+		Set("email_confirmed = ?", true).
+		Where("id = ?", userID).
+		Exec(context.Background())
+	return err
+}
+
 func (db *Instance) GetCorrespondingUser(identity_id string) (*models.User, error) {
 	user := new(models.User)
 	err := db.DB.NewSelect().Model(user).Where("id = ", identity_id).Relation("user_identities").Scan(context.Background())

@@ -13,6 +13,7 @@ providers:
     client_secret: "my-secret"
     key_dir: "./examples/keys"
     auth_html_path: "./templates/auth.html"
+    verifyemail_html_path: "./templates/verifyemail.html"
     redirect_uris:
       - "http://localhost:3000/callback/oauthserver"
     tls:
@@ -38,3 +39,10 @@ storage:
 logging:
   level: "info" # debug, info, warn, error
   format: "json" # json, text
+
+smtp:
+  host: "smtp.resend.com"
+  port: "465"
+  username: "resend"
+  password: "${SMTP_PASSWORD}"
+  from: "admin@pwnhub.in"

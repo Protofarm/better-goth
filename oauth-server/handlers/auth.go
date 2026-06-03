@@ -4,17 +4,20 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	"github.com/Protofarm/better-goth/oauth-server/keys"
 	"github.com/Protofarm/better-goth/oauth-server/models"
+	"github.com/Protofarm/better-goth/oauth-server/smtp"
 	"github.com/Protofarm/better-goth/oauth-server/store"
 )
 
-func AuthorizeHandler(s *store.Store, devMode bool, templatePath string) http.HandlerFunc {
+func AuthorizeHandler(s *store.Store, devMode bool, templatePath string, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) http.HandlerFunc {
 	if authPageTemplate == nil {
 		if err := InitAuthTemplate(templatePath); err != nil {
 			panic("failed to load auth template: " + err.Error())
@@ -31,7 +34,7 @@ func AuthorizeHandler(s *store.Store, devMode bool, templatePath string) http.Ha
 			return
 		}
 
-		handleAuthorizeSubmission(w, r, s, req)
+		handleAuthorizeSubmission(w, r, s, req, km, issuer, mailer)
 	}
 }
 
@@ -110,16 +113,28 @@ func validateAuthorizePKCE(w http.ResponseWriter, r *http.Request, req authorize
 	return true
 }
 
-func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.Store, req authorizeRequest) {
+func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.Store, req authorizeRequest, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 
-	user, formState, err := authorizeUserFromForm(s, r)
+	user, formState, isNew, err := authorizeUserFromForm(s, r)
 	if err != nil {
 		renderAuthorizePage(w, req, formState)
 		return
+	}
+
+	if isNew {
+		token, err := GenerateEmailVerificationToken(user.ID, km, issuer)
+		if err != nil {
+			log.Printf("failed to generate verification token for user %s: %v", user.ID, err)
+		} else {
+			verifyURL := strings.TrimRight(issuer, "/") + "/oauth/verifyEmail?token=" + token
+			if err := mailer.SendVerificationEmail(user.Email, verifyURL); err != nil {
+				log.Printf("failed to send verification email to %s: %v", user.Email, err)
+			}
+		}
 	}
 
 	if err := redirectAuthorizedUser(w, r, s, user, req); err != nil {
@@ -127,7 +142,7 @@ func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.
 	}
 }
 
-func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authFormState, error) {
+func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authFormState, bool, error) {
 	signupUsername := r.FormValue("signup_username")
 	if signupUsername != "" {
 		user := &models.User{
@@ -142,9 +157,9 @@ func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authF
 				SignupUsername: signupUsername,
 				SignupEmail:    r.FormValue("signup_email"),
 				SignupName:     r.FormValue("signup_name"),
-			}, err
+			}, false, err
 		}
-		return user, authFormState{}, nil
+		return user, authFormState{}, true, nil
 	}
 
 	username := r.FormValue("username")
@@ -153,10 +168,10 @@ func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authF
 		return nil, authFormState{
 			ErrorMessage: "Invalid username or password.",
 			Username:     username,
-		}, err
+		}, false, err
 	}
 
-	return user, authFormState{}, nil
+	return user, authFormState{}, false, nil
 }
 
 func redirectAuthorizedUser(w http.ResponseWriter, r *http.Request, s *store.Store, user *models.User, req authorizeRequest) error {

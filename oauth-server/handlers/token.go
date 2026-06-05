@@ -2,11 +2,16 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -117,7 +122,12 @@ func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (
 		return nil, fmt.Errorf(errs.MsgUnknownClient)
 	}
 
-	pubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(client.PublicKey))
+	clientPublicKey, err := fetchPublicKey(client.PublicKeyEndpoint, assertion)
+	if err != nil {
+		return nil, fmt.Errorf(errs.MsgInvalidClientPublicKey)
+	}
+
+	pubKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(clientPublicKey))
 	if err != nil {
 		return nil, fmt.Errorf(errs.MsgInvalidClientPublicKey)
 	}
@@ -447,4 +457,92 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = keyInfo.Kid
 	return token.SignedString(keyInfo.GetPrivateKey())
+}
+
+// TODO: implement caching on jwks response
+func fetchPublicKey(publicKeyEndpoint, assertion string) (string, error) {
+	assertionClaims, _, err := jwt.NewParser().ParseUnverified(assertion, jwt.MapClaims{})
+	if err != nil {
+		return "", nil
+	}
+	kid, _ := assertionClaims.Header["kid"].(string)
+
+	req, err := http.NewRequest("GET", publicKeyEndpoint, nil)
+	if err != nil {
+		return "", nil
+	}
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	type JWK struct {
+		Kty string   `json:"kty"`
+		Kid string   `json:"kid"`
+		N   string   `json:"n"`
+		E   string   `json:"e"`
+		X5c []string `json:"x5c"`
+	}
+
+	type JWKS struct {
+		Keys []JWK `json:"keys"`
+	}
+
+	var jwks JWKS
+	if err := json.Unmarshal(body, &jwks); err != nil {
+		return "", err
+	}
+
+	for _, key := range jwks.Keys {
+		if key.Kid == kid {
+			if len(key.X5c) > 0 {
+				return fmt.Sprintf("-----BEGIN CERTIFICATE-----\n%s\n-----END CERTIFICATE-----", key.X5c[0]), nil
+			}
+			return reconstructRSAPublicKeyPEM(key.N, key.E)
+		}
+	}
+	return "", fmt.Errorf("Unable to fetch key")
+}
+
+// ai-generated slop
+func reconstructRSAPublicKeyPEM(n, e string) (string, error) {
+	nBytes, err := base64.RawURLEncoding.DecodeString(n)
+	if err != nil {
+		return "", err
+	}
+	eBytes, err := base64.RawURLEncoding.DecodeString(e)
+	if err != nil {
+		return "", err
+	}
+
+	var eInt big.Int
+	eInt.SetBytes(eBytes)
+
+	var nInt big.Int
+	nInt.SetBytes(nBytes)
+
+	pubKey := &rsa.PublicKey{
+		N: &nInt,
+		E: int(eInt.Int64()),
+	}
+
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(pubKey)
+	if err != nil {
+		return "", err
+	}
+
+	pemBlock := &pem.Block{
+		Type:  "PUBLIC KEY",
+		Bytes: pubKeyBytes,
+	}
+
+	return string(pem.EncodeToMemory(pemBlock)), nil
 }

@@ -1,19 +1,53 @@
 package models
 
 import (
+	"database/sql"
+	"database/sql/driver"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
 )
 
-type Client struct {
-	ClientID     string
-	ClientSecret string
-	PublicKey    string
-	RedirectURIs []string
-	Scopes       []string
+// custom-types
+type StringList []string
+
+var _ sql.Scanner = (*StringList)(nil)
+
+func (sl *StringList) Scan(value interface{}) error {
+	if value == nil {
+		*sl = []string{}
+		return nil
+	}
+	var s string
+	switch v := value.(type) {
+	case string:
+		s = v
+	case []byte:
+		s = string(v)
+	default:
+		*sl = []string{}
+		return nil
+	}
+
+	if s = strings.TrimSpace(s); s == "" {
+		*sl = []string{}
+	} else {
+		*sl = strings.Split(s, " ")
+	}
+	return nil
 }
 
+var _ driver.Valuer = (*StringList)(nil)
+
+func (sl StringList) Value() (driver.Value, error) {
+	if len(sl) == 0 {
+		return "", nil
+	}
+	return strings.Join(sl, " "), nil
+}
+
+// in-map structs
 type AuthCode struct {
 	Code                string
 	ClientID            string
@@ -89,4 +123,21 @@ type DBToken struct {
 	CreatedAt    time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
 
 	Identity *UserIdentity `bun:"rel:belongs-to,join:identity_id=id"`
+}
+
+type Client struct {
+	bun.BaseModel `bun:"table:clients_info,alias:ci"`
+
+	ID                string     `bun:"id,pk,unique,type:varchar(255)" json:"id"`
+	UserID            string     `bun:"user_id,unique,notnull,type:varchar(255)" json:"user_id"`
+	ClientID          string     `bun:"client_id,unique,notnull,type:varchar(255)" json:"client_id"`
+	ClientSecret      string     `bun:"client_secret,notnull,type:varchar(255)" json:"client_secret"`
+	PublicKeyEndpoint string     `bun:"public_key,type:text" json:"public_key"`
+	RedirectURIs      StringList `bun:"redirect_uris,type:text" json:"redirect_uris"` // Stored as plain text
+	Scopes            StringList `bun:"scopes,type:text" json:"scopes"`
+
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+
+	User *User `bun:"rel:belongs-to,join:user_id=id" json:"-"`
 }

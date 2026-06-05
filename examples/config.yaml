@@ -10,8 +10,8 @@ providers:
     port: "8080"
     issuer_url: "http://localhost:8080"
     client_id: "my-client"
-    client_secret: "my-secret"
-    key_dir: "./examples/keys"
+    client_secret: "${OAUTH_SERVER_CLIENT_SECRET}"
+    key_dir: "./keys"
     auth_html_path: "./templates/auth.html"
     verifyemail_html_path: "./templates/verifyemail.html"
     redirect_uris:
@@ -33,8 +33,8 @@ jwt:
   cookie_name: "session_id"
 
 storage:
-  type: "memory"
-  connection_string: ""
+  type: "mysql" # memory, mysql, postgres, sqlite
+  connection_string: "${CONNECTION_STRING}"
 
 logging:
   level: "info" # debug, info, warn, error

@@ -54,6 +54,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
 	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))
 	mux.HandleFunc("/oauth/verifyEmail", handlers.VerifyEmailHandler(s, privateKM, verifyEmailTemplatePath))
+	mux.HandleFunc("/oauth/client", handlers.ClientHandler(s))
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(privateKM))
 	// admin endpoints
@@ -66,6 +67,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 			Issuer                         string   `json:"issuer"`
 			AuthorizationEndpoint          string   `json:"authorization_endpoint"`
 			TokenEndpoint                  string   `json:"token_endpoint"`
+			ClientEndpoint                 string   `json:"client_endpoint:"`
 			UserinfoEndpoint               string   `json:"userinfo_endpoint"`
 			TokenRevocationEndpoint        string   `json:"tokenrevocation_endpoint"`
 			TokenIntrospectionEndpoint     string   `json:"tokenintrospection_endpoint"`
@@ -82,6 +84,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 			Issuer:                         cfg.IssuerURL,
 			AuthorizationEndpoint:          cfg.IssuerURL + "/authorize",
 			TokenEndpoint:                  cfg.IssuerURL + "/oauth/token",
+			ClientEndpoint:                 cfg.IssuerURL + "/oauth/client",
 			UserinfoEndpoint:               cfg.IssuerURL + "/userinfo",
 			TokenRevocationEndpoint:        cfg.IssuerURL + "/oauth/token/revocation",
 			TokenIntrospectionEndpoint:     cfg.IssuerURL + "/oauth/token/introspection",
@@ -90,7 +93,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 			ScopesSupported:                []string{"openid", "profile", "email"},
 			ResponseTypesSupported:         []string{"code"},
 			GrantTypesSupported:            []string{"authorization_code", "refresh_token", "client_credentials"},
-			TokenEndpointAuthMethods:       []string{"client_secret_basic", "client_secret_post"},
+			TokenEndpointAuthMethods:       []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
 			CodeChallengeMethodsSupported:  []string{"S256"},
 			SubjectTypesSupported:          []string{"public"},
 			IDTokenSigningAlgValuesSupport: []string{"RS256"},

@@ -80,6 +80,12 @@ func InitDB(connType, connStr string) (*Instance, error) {
 		return dbin, errors.New("Unable to create 'tokens' Table.")
 	}
 
+	_, err = db.NewCreateTable().Model((*models.Client)(nil)).IfNotExists().Exec(ctx)
+	if err != nil {
+		log.Fatal(err)
+		return dbin, errors.New("Unable to create 'clients_info' Table.")
+	}
+
 	return dbin, nil
 }
 
@@ -221,4 +227,41 @@ func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) *pb.User {
 		Aud:           pbuser.GetAud(),
 		AtHash:        pbuser.GetAtHash(),
 	}
+}
+
+func (db *Instance) GetClientByID(id string) (*models.Client, error) {
+	client := new(models.Client)
+
+	err := db.DB.NewSelect().Model(client).Where("id = ?", id).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func (db *Instance) GetClientByUserID(userID string) (*models.Client, error) {
+	client := new(models.Client)
+
+	err := db.DB.NewSelect().Model(client).Where("user_id = ?", userID).Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func (db *Instance) CreateClient(ci *models.Client) error {
+	_, err := db.DB.NewInsert().Model(ci).Exec(context.Background())
+	return err
+}
+
+func (db *Instance) UpdateClient(ci *models.Client) error {
+	_, err := db.DB.NewUpdate().Model(ci).Where("id = ?", ci.ID).Exec(context.Background())
+	return err
+}
+
+func (db *Instance) DeleteClient(id string) error {
+	_, err := db.DB.NewDelete().Model((*models.Client)(nil)).Where("id = ?", id).Exec(context.Background())
+	return err
 }

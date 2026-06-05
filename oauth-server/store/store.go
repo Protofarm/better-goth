@@ -1,7 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"log"
 	"strings"
@@ -170,13 +172,71 @@ func (s *Store) GetUserByID(id string) (*models.User, error) {
 }
 
 func (s *Store) GetClient(id string) (*models.Client, error) {
+	client, err := s.db.GetClientByID(id)
+	if err == nil {
+		return client, nil
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	c, ok := s.clients[id]
+	client, ok := s.clients[id]
 	if !ok {
 		return nil, errors.New("client not found")
 	}
-	return c, nil
+	return client, nil
+}
+
+func (s *Store) GetClientByUserID(userID string) (*models.Client, error) {
+	client, err := s.db.GetClientByUserID(userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("Client not found")
+		}
+	}
+	return client, nil
+}
+
+func (s *Store) UpdateClient(id, publicKeyEndpoint string, scope, redirectURIs []string, regenerateSecret bool) error {
+	ci := &models.Client{ID: id}
+
+	if publicKeyEndpoint != "" {
+		ci.PublicKeyEndpoint = publicKeyEndpoint
+	}
+	if scope != nil {
+		ci.Scopes = models.StringList(scope)
+	}
+	if redirectURIs != nil {
+		ci.RedirectURIs = models.StringList(redirectURIs)
+	}
+	if regenerateSecret {
+		secret, _ := generateClientSecret(16)
+		ci.ClientSecret = secret
+	}
+
+	return s.db.UpdateClient(ci) // TODO: handle common errors
+}
+
+func (s *Store) DeleteClient(id string) error {
+	err := s.db.DeleteClient(id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectURIs []string) error {
+	secret, err := generateClientSecret(16)
+	err = s.db.CreateClient(&models.Client{
+		ID:                uuid.New().String(),
+		UserID:            userID,
+		ClientID:          uuid.New().String(),
+		ClientSecret:      secret,
+		PublicKeyEndpoint: publicKeyEndpoint,
+		RedirectURIs:      models.StringList(redirectURIs),
+		Scopes:            models.StringList(scopes),
+	})
+
+	return err
 }
 
 func (s *Store) SaveCode(c *models.AuthCode) {
@@ -241,4 +301,14 @@ func (s *Store) RevokeRefreshToken(token string) {
 		delete(s.tokens, t.AccessToken)
 	}
 	delete(s.refresh, token)
+}
+
+func generateClientSecret(size int) (string, error) {
+	b := make([]byte, size)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }

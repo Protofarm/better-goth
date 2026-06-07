@@ -287,7 +287,7 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, client *models.Cli
 	if time.Now().After(authCode.ExpiresAt) {
 		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgAuthCodeExpired)
 	}
-	if authCode.ClientID != client.ClientID {
+	if authCode.ClientID != client.ID {
 		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgCodeClientMismatch)
 	}
 	if authCode.RedirectURI != redirectURI {
@@ -314,7 +314,7 @@ func handleAuthorizationCode(s *store.Store, r *http.Request, client *models.Cli
 		return nil, errs.CodeInvalidScope, err
 	}
 
-	tok := newToken(authCode.UserID, client.ClientID, scope)
+	tok := newToken(authCode.UserID, client.ID, scope)
 	tok.Nonce = authCode.Nonce
 	return tok, "", nil
 }
@@ -355,7 +355,7 @@ func handleClientCredentials(client *models.Client, requestedScope string) (*mod
 		return nil, errs.CodeInvalidScope, err
 	}
 
-	t := newToken(client.ClientID, client.ClientID, scope)
+	t := newToken(client.UserID, client.ID, scope)
 	t.RefreshToken = "" // not issued for client_credentials
 	return t, "", nil
 }

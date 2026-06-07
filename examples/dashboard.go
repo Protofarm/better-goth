@@ -23,6 +23,7 @@ type routeInfo struct {
 type dashboardData struct {
 	User         *bettergoth.VerifiedUser
 	UserDetails  *bettergoth.TokenRecord
+	AccessToken  string
 	Routes       []routeInfo
 	CookieSecure bool
 }
@@ -62,13 +63,16 @@ func handleDashboard(auth *bettergoth.Auth, store *bettergoth.TokenStore, dashbo
 		}
 
 		var details *bettergoth.TokenRecord
+		var accessToken string
 		if rec, found := store.Get(user.Subject); found {
 			details = &rec
+			accessToken = rec.AccessToken
 		}
 
 		data := dashboardData{
 			User:         user,
 			UserDetails:  details,
+			AccessToken:  accessToken,
 			CookieSecure: cookieSecure,
 			Routes:       dashboardRoutes(),
 		}

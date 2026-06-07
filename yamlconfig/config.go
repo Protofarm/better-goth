@@ -32,6 +32,7 @@ type Config struct {
 			AuthHTMLPath        string   `yaml:"auth_html_path"`
 			VerifyEmailHTMLPath string   `yaml:"verifyemail_html_path"`
 			RedirectURIs        []string `yaml:"redirect_uris"`
+			CORSOrigins         []string `yaml:"cors_origins"`
 			TLS                 struct {
 				Enabled  bool   `yaml:"enabled"`
 				CertPath string `yaml:"cert_path"`

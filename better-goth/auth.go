@@ -175,7 +175,22 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 	a.setFlowCookie(w, oauthVerifierCookieName, codeVerifier, authFlowCookieMaxAge)
 	a.setFlowCookie(w, oauthNonceCookieName, nonce, authFlowCookieMaxAge)
 
-	authURL := provider.Config().AuthCodeURL(state,
+	config := provider.Config()
+	customClientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
+	customClientSecret := strings.TrimSpace(r.URL.Query().Get("client_secret"))
+	if customClientID != "" && customClientSecret != "" {
+		a.setFlowCookie(w, "oauth_custom_client_id", customClientID, authFlowCookieMaxAge)
+		a.setFlowCookie(w, "oauth_custom_client_secret", customClientSecret, authFlowCookieMaxAge)
+		cfg := *config // copy
+		cfg.ClientID = customClientID
+		cfg.ClientSecret = customClientSecret
+		config = &cfg
+	} else {
+		clearCookie(w, "oauth_custom_client_id")
+		clearCookie(w, "oauth_custom_client_secret")
+	}
+
+	authURL := config.AuthCodeURL(state,
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 		oauth2.SetAuthURLParam("nonce", nonce),
@@ -317,12 +332,39 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, ok := exchangeCallbackToken(w, r, provider, code)
+	config := provider.Config()
+	verifier := provider.Verifier()
+
+	var customClientID, customClientSecret string
+	if cookieID, err := r.Cookie("oauth_custom_client_id"); err == nil {
+		customClientID = cookieID.Value
+	}
+	if cookieSec, err := r.Cookie("oauth_custom_client_secret"); err == nil {
+		customClientSecret = cookieSec.Value
+	}
+
+	clearCookie(w, "oauth_custom_client_id")
+	clearCookie(w, "oauth_custom_client_secret")
+
+	if customClientID != "" && customClientSecret != "" {
+		cfg := *config // copy
+		cfg.ClientID = customClientID
+		cfg.ClientSecret = customClientSecret
+		config = &cfg
+
+		if customizer, ok := provider.(interface {
+			VerifierForClientID(clientID string) *oidc.IDTokenVerifier
+		}); ok {
+			verifier = customizer.VerifierForClientID(customClientID)
+		}
+	}
+
+	token, ok := exchangeCallbackToken(w, r, config, code)
 	if !ok {
 		return
 	}
 
-	rawIDToken, claims, subject, ok := verifyCallbackIdentity(w, r, provider, token)
+	rawIDToken, claims, subject, ok := verifyCallbackIdentity(w, r, verifier, token)
 	if !ok {
 		return
 	}
@@ -401,14 +443,14 @@ func validateCallbackState(w http.ResponseWriter, r *http.Request, state string)
 	return true
 }
 
-func exchangeCallbackToken(w http.ResponseWriter, r *http.Request, provider Provider, code string) (*oauth2.Token, bool) {
+func exchangeCallbackToken(w http.ResponseWriter, r *http.Request, cfg *oauth2.Config, code string) (*oauth2.Token, bool) {
 	verifierCookie, err := r.Cookie(oauthVerifierCookieName)
 	if err != nil {
 		http.Error(w, "code_verifier cookie missing", http.StatusBadRequest)
 		return nil, false
 	}
 
-	token, err := exchangeWithPKCE(r.Context(), provider.Config(), code, verifierCookie.Value)
+	token, err := exchangeWithPKCE(r.Context(), cfg, code, verifierCookie.Value)
 	if err != nil {
 		http.Error(w, "failed to exchange token: "+err.Error(), http.StatusInternalServerError)
 		return nil, false
@@ -418,14 +460,14 @@ func exchangeCallbackToken(w http.ResponseWriter, r *http.Request, provider Prov
 	return token, true
 }
 
-func verifyCallbackIdentity(w http.ResponseWriter, r *http.Request, provider Provider, token *oauth2.Token) (string, map[string]interface{}, string, bool) {
+func verifyCallbackIdentity(w http.ResponseWriter, r *http.Request, verifier *oidc.IDTokenVerifier, token *oauth2.Token) (string, map[string]interface{}, string, bool) {
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
 		http.Error(w, "no id_token field", http.StatusInternalServerError)
 		return "", nil, "", false
 	}
 
-	idToken, err := provider.Verifier().Verify(r.Context(), rawIDToken)
+	idToken, err := verifier.Verify(r.Context(), rawIDToken)
 	if err != nil {
 		http.Error(w, "failed to verify id_token", http.StatusInternalServerError)
 		return "", nil, "", false

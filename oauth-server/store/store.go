@@ -20,9 +20,6 @@ type Store struct {
 	mu sync.RWMutex
 	db *database.Instance
 
-	// in-memory or DB
-	clients map[string]*models.Client
-
 	// in-memory or cached
 	codes   map[string]*models.AuthCode
 	tokens  map[string]*models.Token
@@ -39,7 +36,6 @@ type Config struct {
 func NewStore(db *database.Instance, cfg Config) *Store {
 	s := &Store{
 		db:      db,
-		clients: make(map[string]*models.Client),
 		codes:   make(map[string]*models.AuthCode),
 		tokens:  make(map[string]*models.Token),
 		refresh: make(map[string]*models.Token),
@@ -92,11 +88,14 @@ func (s *Store) seed(cfg Config) {
 		log.Printf("Unable to create dummy user: %v", err)
 	}
 
-	s.clients[clientID] = &models.Client{
-		ClientID:     clientID,
+	if err := s.db.CreateClient(&models.Client{
+		ID:           clientID,
+		UserID:       u.ID,
 		ClientSecret: clientSecret,
 		RedirectURIs: redirectURIs,
 		Scopes:       []string{"openid", "profile", "email"},
+	}); err != nil {
+		log.Printf("Unable to create dummy client: %v", err)
 	}
 }
 
@@ -176,14 +175,7 @@ func (s *Store) GetClient(id string) (*models.Client, error) {
 	if err == nil {
 		return client, nil
 	}
-
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	client, ok := s.clients[id]
-	if !ok {
-		return nil, errors.New("client not found")
-	}
-	return client, nil
+	return nil, errors.New("client not found")
 }
 
 func (s *Store) GetClientByUserID(userID string) (*models.Client, error) {
@@ -196,24 +188,35 @@ func (s *Store) GetClientByUserID(userID string) (*models.Client, error) {
 	return client, nil
 }
 
-func (s *Store) UpdateClient(id, publicKeyEndpoint string, scope, redirectURIs []string, regenerateSecret bool) error {
-	ci := &models.Client{ID: id}
+func (s *Store) UpdateClient(id, publicKeyEndpoint string, scope, redirectURIs []string, regenerateSecret bool) (*models.Client, error) {
+	existingClient, err := s.db.GetClientByID(id)
+	if err != nil {
+		return nil, errors.New("client not found")
+	}
 
 	if publicKeyEndpoint != "" {
-		ci.PublicKeyEndpoint = publicKeyEndpoint
+		existingClient.PublicKeyEndpoint = publicKeyEndpoint
 	}
 	if scope != nil {
-		ci.Scopes = models.StringList(scope)
+		existingClient.Scopes = models.StringList(scope)
 	}
 	if redirectURIs != nil {
-		ci.RedirectURIs = models.StringList(redirectURIs)
+		existingClient.RedirectURIs = models.StringList(redirectURIs)
 	}
 	if regenerateSecret {
-		secret, _ := generateClientSecret(16)
-		ci.ClientSecret = secret
+		secret, err := generateClientSecret(16)
+		if err != nil {
+			return nil, err
+		}
+		existingClient.ClientSecret = secret
+		log.Printf("Updated client %s. Regenerated secret: %s", id, secret)
 	}
 
-	return s.db.UpdateClient(ci) // TODO: handle common errors
+	err = s.db.UpdateClient(existingClient)
+	if err != nil {
+		return nil, err
+	}
+	return existingClient, nil
 }
 
 func (s *Store) DeleteClient(id string) error {
@@ -224,19 +227,25 @@ func (s *Store) DeleteClient(id string) error {
 	return nil
 }
 
-func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectURIs []string) error {
+func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectURIs []string) (*models.Client, error) {
 	secret, err := generateClientSecret(16)
-	err = s.db.CreateClient(&models.Client{
+	if err != nil {
+		return nil, err
+	}
+	client := &models.Client{
 		ID:                uuid.New().String(),
 		UserID:            userID,
-		ClientID:          uuid.New().String(),
 		ClientSecret:      secret,
 		PublicKeyEndpoint: publicKeyEndpoint,
 		RedirectURIs:      models.StringList(redirectURIs),
 		Scopes:            models.StringList(scopes),
-	})
-
-	return err
+	}
+	err = s.db.CreateClient(client)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Created client %s for user %s. Generated secret: %s", client.ID, userID, secret)
+	return client, nil
 }
 
 func (s *Store) SaveCode(c *models.AuthCode) {

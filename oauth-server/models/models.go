@@ -130,8 +130,7 @@ type Client struct {
 
 	ID                string     `bun:"id,pk,unique,type:varchar(255)" json:"id"`
 	UserID            string     `bun:"user_id,unique,notnull,type:varchar(255)" json:"user_id"`
-	ClientID          string     `bun:"client_id,unique,notnull,type:varchar(255)" json:"client_id"`
-	ClientSecret      string     `bun:"client_secret,notnull,type:varchar(255)" json:"client_secret"`
+	ClientSecret      string     `bun:"client_secret,notnull,type:varchar(255)" json:"client_secret,omitempty"`
 	PublicKeyEndpoint string     `bun:"public_key,type:text" json:"public_key"`
 	RedirectURIs      StringList `bun:"redirect_uris,type:text" json:"redirect_uris"` // Stored as plain text
 	Scopes            StringList `bun:"scopes,type:text" json:"scopes"`

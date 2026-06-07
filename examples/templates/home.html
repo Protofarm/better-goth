@@ -22,19 +22,43 @@
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
     }
 
-    a.button {
+    .button {
       display: inline-block;
       padding: 0.65rem 1rem;
       border-radius: 8px;
       text-decoration: none;
       border: 1px solid #111;
+      background: #fff;
       color: #111;
       font-weight: 600;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 1rem;
     }
 
-    a.button:hover {
+    .button:hover {
       background: #111;
       color: #fff;
+    }
+
+    .form-group {
+      margin-bottom: 0.75rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .form-group input {
+      width: 100%;
+      max-width: 300px;
+      padding: 0.4rem;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: inherit;
     }
 
     code {
@@ -52,12 +76,25 @@
     </p>
 
     <h2>Login Options</h2>
+    <div style="margin-bottom: 1.5rem;">
+      <form action="{{ .OAuthServerLoginPath }}" method="GET" style="display: flex; flex-direction: column; gap: 0.5rem; max-width: 320px; background: #f9f9f9; padding: 1rem; border-radius: 8px; border: 1px solid #eee;">
+        <h3 style="margin-top: 0; margin-bottom: 0.75rem; font-size: 1.1rem; color: #111;">Login with oauth-server</h3>
+        <div class="form-group">
+          <label for="client_id">Client ID (optional)</label>
+          <input type="text" id="client_id" name="client_id" placeholder="my-client" />
+        </div>
+        <div class="form-group">
+          <label for="client_secret">Client Secret (optional)</label>
+          <input type="password" id="client_secret" name="client_secret" placeholder="my-secret" />
+        </div>
+        <button class="button" type="submit" style="align-self: flex-start;">Login</button>
+      </form>
+    </div>
+    {{if .GoogleLoginPath}}
     <p>
-      <a class="button" href="{{ .OAuthServerLoginPath }}">Login with oauth-server</a>
-      {{if .GoogleLoginPath}}
       <a class="button" href="{{ .GoogleLoginPath }}">Login with Google</a>
-      {{end}}
     </p>
+    {{end}}
 
     <p>
       Need an account for oauth-server? Create one at

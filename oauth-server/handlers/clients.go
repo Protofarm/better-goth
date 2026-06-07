@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +13,7 @@ import (
 )
 
 type body struct {
-	RegenerateSecret  bool     `json:"regenerate_client_secret"`
+	RegenerateSecret  bool     `json:"regenerate_secret"`
 	PublicKeyEndpoint string   `json:"public_key_endpoint"`
 	RedirectURIs      []string `json:"redirect_uris"`
 	Scopes            []string `json:"scopes"`
@@ -49,6 +50,7 @@ func ClientHandler(s *store.Store) http.HandlerFunc {
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
+			client.ClientSecret = "" // Only show secret on creation or regeneration
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(client)
@@ -56,33 +58,48 @@ func ClientHandler(s *store.Store) http.HandlerFunc {
 		case http.MethodPost:
 			var reqBody body
 			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+				log.Printf("Failed to decode request body: %v", err)
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
-			err := s.CreateClient(userID, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs)
+			client, err := s.CreateClient(userID, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs)
 			if err != nil {
+				log.Printf("Failed to create client for user %s: %v", userID, err)
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(client)
 
 		case http.MethodPatch:
 			var reqBody body
 			if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+				log.Printf("Failed to decode PATCH request body: %v", err)
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
+			log.Printf("PATCH request for user %s: regenerate=%v, endpoint=%s, scopes=%v, redirects=%v", 
+				userID, reqBody.RegenerateSecret, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs)
+			
 			client, err := s.GetClientByUserID(userID)
 			if err != nil {
+				log.Printf("Failed to get client for user %s: %v", userID, err)
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
-			err = s.UpdateClient(client.ID, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs, reqBody.RegenerateSecret)
+			updatedClient, err := s.UpdateClient(client.ID, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs, reqBody.RegenerateSecret)
 			if err != nil {
+				log.Printf("Failed to update client %s: %v", client.ID, err)
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
+			if !reqBody.RegenerateSecret {
+				updatedClient.ClientSecret = "" // Hide secret if not regenerated
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(updatedClient)
 
 		case http.MethodDelete:
 			client, err := s.GetClientByUserID(userID)

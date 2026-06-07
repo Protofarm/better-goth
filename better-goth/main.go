@@ -49,6 +49,7 @@ type runtimeConfig struct {
 	OAuthKeyDir       string
 	OAuthRedirectURIs []string
 	OAuthRedirectURL  string
+	OAuthCORSOrigins  []string
 	OAuthAuthHTMLPath        string
 	OAuthVerifyEmailHTMLPath string
 	OAuthTLSCertPath         string
@@ -234,6 +235,8 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		}
 	}
 	rc.OAuthRedirectURL = rc.OAuthRedirectURIs[0]
+	
+	rc.OAuthCORSOrigins = oauthCfg.CORSOrigins
 
 	return rc
 }
@@ -271,6 +274,7 @@ func (ctx *setupContext) startOAuthServer() error {
 		VerifyEmailHTMLPath: rc.OAuthVerifyEmailHTMLPath,
 		DevMode:      rc.DevMode,
 		SMTPConfig:   rc.SMTP,
+		CORSOrigins:  rc.OAuthCORSOrigins,
 	})
 	if err != nil {
 		return err

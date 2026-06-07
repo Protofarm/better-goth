@@ -25,9 +25,10 @@ type ServerConfig struct {
 	VerifyEmailHTMLPath string
 	DevMode             bool
 	SMTPConfig          smtp.Config
+	CORSOrigins         []string
 }
 
-func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux, error) {
+func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (http.Handler, error) {
 	privateKM := keys.NewKeyManager(cfg.KeyDir)
 
 	s := store.NewStore(db, store.Config{
@@ -104,5 +105,5 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (*http.ServeMux,
 		}
 	})
 
-	return mux, nil
+	return middleware.CORSWithOrigins(mux, cfg.CORSOrigins), nil
 }

@@ -16,6 +16,8 @@ providers:
     verifyemail_html_path: "./templates/verifyemail.html"
     redirect_uris:
       - "http://localhost:3000/callback/oauthserver"
+    cors_origins:
+      - "http://localhost:3000"
     tls:
       enabled: false
       cert_path: ""
@@ -33,7 +35,7 @@ jwt:
   cookie_name: "session_id"
 
 storage:
-  type: "mysql" # memory, mysql, postgres, sqlite
+  type: "memory" # memory, mysql, postgres, sqlite
   connection_string: "${CONNECTION_STRING}"
 
 logging:

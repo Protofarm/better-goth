@@ -9,9 +9,10 @@ import (
 )
 
 type Provider struct {
-	name     string
-	config   *oauth2.Config
-	verifier *oidc.IDTokenVerifier
+	name         string
+	config       *oauth2.Config
+	verifier     *oidc.IDTokenVerifier
+	oidcProvider *oidc.Provider
 }
 
 func NewProvider(name, issuerURL, clientID, clientSecret, redirectURL string, scopes []string) (*Provider, error) {
@@ -33,9 +34,10 @@ func NewProvider(name, issuerURL, clientID, clientSecret, redirectURL string, sc
 	}
 
 	return &Provider{
-		name:     name,
-		config:   cfg,
-		verifier: verifier,
+		name:         name,
+		config:       cfg,
+		verifier:     verifier,
+		oidcProvider: provider,
 	}, nil
 }
 
@@ -49,6 +51,15 @@ func (p *Provider) Config() *oauth2.Config {
 
 func (p *Provider) Verifier() *oidc.IDTokenVerifier {
 	return p.verifier
+}
+
+func (p *Provider) VerifierForClientID(clientID string) *oidc.IDTokenVerifier {
+	if p.oidcProvider == nil {
+		return p.verifier
+	}
+	return p.oidcProvider.Verifier(&oidc.Config{
+		ClientID: clientID,
+	})
 }
 
 func withDefaultOIDCScopes(scopes []string) []string {

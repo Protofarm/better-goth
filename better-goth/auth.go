@@ -374,7 +374,11 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pbuser := buildUserFromClaims(claims, subject, "")
-	user := a.db.GetOrCreateUser(pbuser, providerName)
+	user, err := a.db.GetOrCreateUser(pbuser, providerName)
+	if err != nil {
+		http.Error(w, "failed to get or create user: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	signedToken, err := a.signJWT(user.GetSub(), token.Expiry)
 	if err != nil {
 		http.Error(w, "failed to sign JWT", http.StatusInternalServerError)

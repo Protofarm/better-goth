@@ -17,13 +17,17 @@ import (
 )
 
 type Store struct {
-	mu sync.RWMutex
 	db *database.Instance
 
 	// in-memory or cached
+	codesMu sync.RWMutex
 	codes   map[string]*models.AuthCode
-	tokens  map[string]*models.Token
-	refresh map[string]*models.Token
+
+	tokensMu sync.RWMutex
+	tokens   map[string]*models.Token
+
+	refreshMu sync.RWMutex
+	refresh   map[string]*models.Token
 }
 
 type Config struct {
@@ -102,6 +106,9 @@ func (s *Store) seed(cfg Config) {
 func (s *Store) CreateUser(user *models.User) error {
 	user.ID = uuid.New().String()
 	hash, err := hashPassword(user.PasswordHash)
+	if err != nil {
+		return err
+	}
 	user.PasswordHash = hash
 
 	if err := s.db.CreateUser(user); err != nil {
@@ -220,11 +227,7 @@ func (s *Store) UpdateClient(id, publicKeyEndpoint string, scope, redirectURIs [
 }
 
 func (s *Store) DeleteClient(id string) error {
-	err := s.db.DeleteClient(id)
-	if err != nil {
-		return err
-	}
-	return nil
+	return s.db.DeleteClient(id)
 }
 
 func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectURIs []string) (*models.Client, error) {
@@ -249,14 +252,14 @@ func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectU
 }
 
 func (s *Store) SaveCode(c *models.AuthCode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.codesMu.Lock()
+	defer s.codesMu.Unlock()
 	s.codes[c.Code] = c
 }
 
 func (s *Store) PopCode(code string) (*models.AuthCode, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.codesMu.Lock()
+	defer s.codesMu.Unlock()
 	c, ok := s.codes[code]
 	if !ok {
 		return nil, errors.New("code not found")
@@ -266,17 +269,20 @@ func (s *Store) PopCode(code string) (*models.AuthCode, error) {
 }
 
 func (s *Store) SaveToken(t *models.Token) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.tokensMu.Lock()
 	s.tokens[t.AccessToken] = t
+	s.tokensMu.Unlock()
+
 	if t.RefreshToken != "" {
+		s.refreshMu.Lock()
 		s.refresh[t.RefreshToken] = t
+		s.refreshMu.Unlock()
 	}
 }
 
 func (s *Store) GetByAccessToken(token string) (*models.Token, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.tokensMu.RLock()
+	defer s.tokensMu.RUnlock()
 	t, ok := s.tokens[token]
 	if !ok {
 		return nil, errors.New("access token not found")
@@ -285,8 +291,8 @@ func (s *Store) GetByAccessToken(token string) (*models.Token, error) {
 }
 
 func (s *Store) GetByRefreshToken(token string) (*models.Token, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.refreshMu.RLock()
+	defer s.refreshMu.RUnlock()
 	t, ok := s.refresh[token]
 	if !ok {
 		return nil, errors.New("refresh token not found")
@@ -295,21 +301,29 @@ func (s *Store) GetByRefreshToken(token string) (*models.Token, error) {
 }
 
 func (s *Store) RevokeAccessToken(token string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t, ok := s.tokens[token]; ok {
-		delete(s.refresh, t.RefreshToken)
-	}
+	s.tokensMu.Lock()
+	t, ok := s.tokens[token]
 	delete(s.tokens, token)
+	s.tokensMu.Unlock()
+
+	if ok && t.RefreshToken != "" {
+		s.refreshMu.Lock()
+		delete(s.refresh, t.RefreshToken)
+		s.refreshMu.Unlock()
+	}
 }
 
 func (s *Store) RevokeRefreshToken(token string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t, ok := s.refresh[token]; ok {
-		delete(s.tokens, t.AccessToken)
-	}
+	s.refreshMu.Lock()
+	t, ok := s.refresh[token]
 	delete(s.refresh, token)
+	s.refreshMu.Unlock()
+
+	if ok {
+		s.tokensMu.Lock()
+		delete(s.tokens, t.AccessToken)
+		s.tokensMu.Unlock()
+	}
 }
 
 func generateClientSecret(size int) (string, error) {

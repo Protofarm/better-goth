@@ -28,6 +28,7 @@ type WriteJob func(bun.Tx) error
 type Instance struct {
 	DB      *bun.DB
 	writeCh chan WriteJob
+	enqueue func(WriteJob) error
 }
 
 func InitDB(connType, connStr string) (*Instance, error) {
@@ -60,33 +61,36 @@ func InitDB(connType, connStr string) (*Instance, error) {
 		DB:      db,
 		writeCh: make(chan WriteJob),
 	}
-	go dbin.runWriter()
-
-	_, err = db.NewCreateTable().Model((*models.User)(nil)).IfNotExists().Exec(ctx)
-	if err != nil {
-		log.Fatal(err)
-		return dbin, errors.New("Unable to create 'users' Table.")
+	if connType == sqliteshim.ShimName {
+		dbin.DB.SetMaxOpenConns(1)
+		go dbin.runWriter()
+		dbin.enqueue = dbin.EnqueueWrite
+	} else {
+		dbin.enqueue = dbin.EnqueueDirectWrite
 	}
 
-	_, err = db.NewCreateTable().Model((*models.UserIdentity)(nil)).IfNotExists().Exec(ctx)
-	if err != nil {
-		log.Fatal(err)
-		return dbin, errors.New("Unable to create 'user_identities' Table.")
+	tables := []struct {
+		model any
+		name  string
+	}{
+		{(*models.User)(nil), "users"},
+		{(*models.UserIdentity)(nil), "user_identities"},
+		{(*models.DBToken)(nil), "tokens"},
+		{(*models.Client)(nil), "clients_info"},
 	}
-
-	_, err = db.NewCreateTable().Model((*models.DBToken)(nil)).IfNotExists().Exec(ctx)
-	if err != nil {
-		log.Fatal(err)
-		return dbin, errors.New("Unable to create 'tokens' Table.")
-	}
-
-	_, err = db.NewCreateTable().Model((*models.Client)(nil)).IfNotExists().Exec(ctx)
-	if err != nil {
-		log.Fatal(err)
-		return dbin, errors.New("Unable to create 'clients_info' Table.")
+	for _, t := range tables {
+		if _, err := db.NewCreateTable().Model(t.model).IfNotExists().Exec(ctx); err != nil {
+			log.Printf("unable to create '%s' table: %v", t.name, err)
+			return nil, err
+		}
 	}
 
 	return dbin, nil
+}
+
+func (db *Instance) Close() error {
+	close(db.writeCh)
+	return db.DB.Close()
 }
 
 func (db *Instance) runWriter() {
@@ -100,6 +104,12 @@ func (db *Instance) runWriter() {
 	}
 }
 
+func (db *Instance) EnqueueDirectWrite(job WriteJob) error {
+	return db.DB.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
+		return job(tx)
+	})
+}
+
 func (db *Instance) EnqueueWrite(job WriteJob) error {
 	done := make(chan error, 1)
 	db.writeCh <- func(tx bun.Tx) error {
@@ -111,14 +121,18 @@ func (db *Instance) EnqueueWrite(job WriteJob) error {
 }
 
 func (db *Instance) CreateUser(user *models.User) error {
-	_, err := db.DB.NewInsert().Model(user).Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(user).Exec(context.Background())
+		return err
+	})
 }
 
 func (db *Instance) GetUserByID(id string) (*models.User, error) {
 	user := new(models.User)
 
-	err := db.DB.NewSelect().Model(user).Where("id = ?", id).Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(user).Where("id = ?", id).Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +143,9 @@ func (db *Instance) GetUserByID(id string) (*models.User, error) {
 func (db *Instance) GetUserByEmail(email string) (*models.User, error) {
 	user := new(models.User)
 
-	err := db.DB.NewSelect().Model(user).Where("email = ?", email).Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(user).Where("email = ?", email).Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +156,9 @@ func (db *Instance) GetUserByEmail(email string) (*models.User, error) {
 func (db *Instance) GetUserByName(name string) (*models.User, error) {
 	user := new(models.User)
 
-	err := db.DB.NewSelect().Model(user).Where("name = ?", name).Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(user).Where("name = ?", name).Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -149,22 +167,28 @@ func (db *Instance) GetUserByName(name string) (*models.User, error) {
 }
 
 func (db *Instance) CreateUserIdentity(identity *models.UserIdentity) error {
-	_, err := db.DB.NewInsert().Model(identity).Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(identity).Exec(context.Background())
+		return err
+	})
 }
 
 func (db *Instance) ConfirmEmailByUserID(userID string) error {
-	_, err := db.DB.NewUpdate().
-		Model((*models.User)(nil)).
-		Set("email_confirmed = ?", true).
-		Where("id = ?", userID).
-		Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewUpdate().
+			Model((*models.User)(nil)).
+			Set("email_confirmed = ?", true).
+			Where("id = ?", userID).
+			Exec(context.Background())
+		return err
+	})
 }
 
 func (db *Instance) GetCorrespondingUser(identity_id string) (*models.User, error) {
 	user := new(models.User)
-	err := db.DB.NewSelect().Model(user).Where("id = ", identity_id).Relation("user_identities").Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(user).Where("id = ?", identity_id).Relation("user_identities").Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -172,11 +196,16 @@ func (db *Instance) GetCorrespondingUser(identity_id string) (*models.User, erro
 }
 
 func (db *Instance) CheckUserIdentityExists(userid string) bool {
-	count, err := db.DB.NewSelect().
-		Model((*models.UserIdentity)(nil)).
-		Where("user_id = ?", userid).
-		Where("provider = ?", providers.OAuthServerProviderName).
-		Count(context.Background())
+	var count int
+	err := db.enqueue(func(tx bun.Tx) error {
+		var err error
+		count, err = tx.NewSelect().
+			Model((*models.UserIdentity)(nil)).
+			Where("user_id = ?", userid).
+			Where("provider = ?", providers.OAuthServerProviderName).
+			Count(context.Background())
+		return err
+	})
 	if err != nil {
 		log.Printf("Error checking user identity existence: %v", err)
 		return false
@@ -184,10 +213,21 @@ func (db *Instance) CheckUserIdentityExists(userid string) bool {
 	return count > 0
 }
 
-func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) *pb.User {
-	user, err := db.GetUserByEmail(pbuser.Email)
-	if err != nil {
-		user = &models.User{
+func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) (*pb.User, error) {
+	user := new(models.User)
+
+	err := db.enqueue(func(tx bun.Tx) error {
+		ctx := context.Background()
+
+		err := tx.NewSelect().Model(user).Where("email = ?", pbuser.GetEmail()).Scan(ctx)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+
+		*user = models.User{
 			ID:             uuid.New().String(),
 			Email:          pbuser.GetEmail(),
 			Name:           pbuser.GetName(),
@@ -195,22 +235,21 @@ func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) *pb.User {
 			Picture:        pbuser.GetPicture(),
 			EmailConfirmed: pbuser.GetEmailVerified(),
 		}
-
-		db.EnqueueWrite(func(tx bun.Tx) error {
-			_, err := tx.NewInsert().Model(user).Exec(context.Background())
-			if err != nil {
-				return err
-			}
-
-			ui := &models.UserIdentity{
-				ID:       uuid.New().String(),
-				UserID:   user.ID,
-				Sub:      pbuser.GetSub(),
-				Provider: provider,
-			}
-			_, err = tx.NewInsert().Model(ui).Exec(context.Background())
+		if _, err := tx.NewInsert().Model(user).Exec(ctx); err != nil {
 			return err
-		})
+		}
+
+		ui := &models.UserIdentity{
+			ID:       uuid.New().String(),
+			UserID:   user.ID,
+			Sub:      pbuser.GetSub(),
+			Provider: provider,
+		}
+		_, err = tx.NewInsert().Model(ui).Exec(ctx)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &pb.User{
@@ -226,13 +265,15 @@ func (db *Instance) GetOrCreateUser(pbuser *pb.User, provider string) *pb.User {
 		Azp:           pbuser.GetAzp(),
 		Aud:           pbuser.GetAud(),
 		AtHash:        pbuser.GetAtHash(),
-	}
+	}, nil
 }
 
 func (db *Instance) GetClientByID(id string) (*models.Client, error) {
 	client := new(models.Client)
 
-	err := db.DB.NewSelect().Model(client).Where("id = ?", id).Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(client).Where("id = ?", id).Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +284,9 @@ func (db *Instance) GetClientByID(id string) (*models.Client, error) {
 func (db *Instance) GetClientByUserID(userID string) (*models.Client, error) {
 	client := new(models.Client)
 
-	err := db.DB.NewSelect().Model(client).Where("user_id = ?", userID).Scan(context.Background())
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(client).Where("user_id = ?", userID).Scan(context.Background())
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -252,16 +295,22 @@ func (db *Instance) GetClientByUserID(userID string) (*models.Client, error) {
 }
 
 func (db *Instance) CreateClient(ci *models.Client) error {
-	_, err := db.DB.NewInsert().Model(ci).Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(ci).Exec(context.Background())
+		return err
+	})
 }
 
 func (db *Instance) UpdateClient(ci *models.Client) error {
-	_, err := db.DB.NewUpdate().Model(ci).Where("id = ?", ci.ID).Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewUpdate().Model(ci).Where("id = ?", ci.ID).Exec(context.Background())
+		return err
+	})
 }
 
 func (db *Instance) DeleteClient(id string) error {
-	_, err := db.DB.NewDelete().Model((*models.Client)(nil)).Where("id = ?", id).Exec(context.Background())
-	return err
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewDelete().Model((*models.Client)(nil)).Where("id = ?", id).Exec(context.Background())
+		return err
+	})
 }

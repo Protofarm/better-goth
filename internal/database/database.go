@@ -6,9 +6,9 @@ import (
 	"errors"
 	"log"
 
-	"github.com/Protofarm/better-goth/oauth-server/models"
-	"github.com/Protofarm/better-goth/pb"
-	"github.com/Protofarm/better-goth/providers"
+	"github.com/Protofarm/better-goth/internal/oauth-server/models"
+	"github.com/Protofarm/better-goth/internal/pb"
+	"github.com/Protofarm/better-goth/internal/providers"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/schema"

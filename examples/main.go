@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	bettergoth "github.com/Protofarm/better-goth/better-goth"
+	bettergoth "github.com/Protofarm/better-goth"
 	"github.com/joho/godotenv"
 )
 

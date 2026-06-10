@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
-	"github.com/Protofarm/better-goth/oauth-server/middleware"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
+	"github.com/Protofarm/better-goth/internal/oauth-server/middleware"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 type body struct {
@@ -79,9 +79,9 @@ func ClientHandler(s *store.Store) http.HandlerFunc {
 				errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 				return
 			}
-			log.Printf("PATCH request for user %s: regenerate=%v, endpoint=%s, scopes=%v, redirects=%v", 
+			log.Printf("PATCH request for user %s: regenerate=%v, endpoint=%s, scopes=%v, redirects=%v",
 				userID, reqBody.RegenerateSecret, reqBody.PublicKeyEndpoint, reqBody.Scopes, reqBody.RedirectURIs)
-			
+
 			client, err := s.GetClientByUserID(userID)
 			if err != nil {
 				log.Printf("Failed to get client for user %s: %v", userID, err)

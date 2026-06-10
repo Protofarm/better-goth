@@ -8,8 +8,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/Protofarm/better-goth/oauth-server/keys"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 func GenerateEmailVerificationToken(userID string, km *keys.KeyManager, issuer string) (string, error) {

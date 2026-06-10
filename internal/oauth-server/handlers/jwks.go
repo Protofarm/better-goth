@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"net/http"
 
-	"github.com/Protofarm/better-goth/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
 )
 
 // JWKSHandler serves GET /.well-known/jwks.json so any client can fetch

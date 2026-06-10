@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Protofarm/better-goth/database"
-	"github.com/Protofarm/better-goth/oauth-server/handlers"
-	"github.com/Protofarm/better-goth/oauth-server/keys"
-	"github.com/Protofarm/better-goth/oauth-server/middleware"
-	"github.com/Protofarm/better-goth/oauth-server/smtp"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	"github.com/Protofarm/better-goth/internal/database"
+	"github.com/Protofarm/better-goth/internal/oauth-server/handlers"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/middleware"
+	"github.com/Protofarm/better-goth/internal/oauth-server/smtp"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 type ServerConfig struct {

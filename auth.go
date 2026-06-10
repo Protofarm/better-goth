@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Protofarm/better-goth/database"
-	"github.com/Protofarm/better-goth/pb"
+	"github.com/Protofarm/better-goth/internal/database"
+	"github.com/Protofarm/better-goth/internal/pb"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"

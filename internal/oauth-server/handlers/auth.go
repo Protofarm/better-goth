@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
-	"github.com/Protofarm/better-goth/oauth-server/keys"
-	"github.com/Protofarm/better-goth/oauth-server/models"
-	"github.com/Protofarm/better-goth/oauth-server/smtp"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/models"
+	"github.com/Protofarm/better-goth/internal/oauth-server/smtp"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 func AuthorizeHandler(s *store.Store, devMode bool, templatePath string, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) http.HandlerFunc {

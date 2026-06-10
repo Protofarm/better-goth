@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
-	"github.com/Protofarm/better-goth/oauth-server/models"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
+	"github.com/Protofarm/better-goth/internal/oauth-server/models"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 func RevocationHandler(s *store.Store) http.HandlerFunc {

@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	bettergoth "github.com/Protofarm/better-goth/better-goth"
-	"github.com/Protofarm/better-goth/providers"
+	bettergoth "github.com/Protofarm/better-goth"
+	"github.com/Protofarm/better-goth/internal/providers"
 )
 
 func registerExampleRoutes(router bettergoth.RouteRegistrar, runtime *bettergoth.Runtime) error {

@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
-	"github.com/Protofarm/better-goth/oauth-server/keys"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 	"github.com/golang-jwt/jwt/v5"
 )
 

@@ -4,7 +4,7 @@ import (
 	"html/template"
 	"net/http"
 
-	bettergoth "github.com/Protofarm/better-goth/better-goth"
+	bettergoth "github.com/Protofarm/better-goth"
 )
 
 const (

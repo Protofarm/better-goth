@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
 )
 
 func normalizeScope(scope string) string {

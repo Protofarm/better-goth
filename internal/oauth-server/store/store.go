@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Protofarm/better-goth/database"
-	"github.com/Protofarm/better-goth/oauth-server/models"
-	"github.com/Protofarm/better-goth/providers"
+	"github.com/Protofarm/better-goth/internal/database"
+	"github.com/Protofarm/better-goth/internal/oauth-server/models"
+	"github.com/Protofarm/better-goth/internal/providers"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )

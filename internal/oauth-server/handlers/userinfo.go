@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
-	"github.com/Protofarm/better-goth/oauth-server/middleware"
-	"github.com/Protofarm/better-goth/oauth-server/store"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
+	"github.com/Protofarm/better-goth/internal/oauth-server/middleware"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
 // UserInfoHandler serves GET /userinfo.

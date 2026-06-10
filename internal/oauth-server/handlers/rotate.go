@@ -5,9 +5,9 @@ import (
 	"log"
 	"net/http"
 
-	errs "github.com/Protofarm/better-goth/oauth-server/errors"
+	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
 
-	"github.com/Protofarm/better-goth/oauth-server/keys"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
 )
 
 func RotateHandler(km *keys.KeyManager) http.HandlerFunc {

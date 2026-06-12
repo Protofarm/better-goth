@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"html/template"
 	"log"
 	"net/http"
@@ -16,6 +17,8 @@ import (
 	"github.com/Protofarm/better-goth/internal/oauth-server/smtp"
 	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
+
+const OauthStateCookieName = "oauth_state"
 
 func AuthorizeHandler(s *store.Store, devMode bool, templatePath string, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) http.HandlerFunc {
 	if authPageTemplate == nil {
@@ -151,6 +154,15 @@ func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authF
 			GivenName:    r.FormValue("signup_name"),
 			PasswordHash: r.FormValue("signup_password"),
 		}
+		ok := validateCallbackState(r)
+		if !ok {
+			return nil, authFormState{
+				ErrorMessage:   "Invalid State Cookie",
+				SignupUsername: signupUsername,
+				SignupEmail:    r.FormValue("signup_email"),
+				SignupName:     r.FormValue("signup_name"),
+			}, false, errors.New("invalid state")
+		}
 		if err := s.CreateUser(user); err != nil {
 			return nil, authFormState{
 				ErrorMessage:   "Username or email already taken.",
@@ -259,6 +271,12 @@ func isValidRedirect(allowed []string, uri string, devMode bool) bool {
 		}
 	}
 	return false
+}
+
+func validateCallbackState(r *http.Request) bool {
+	state := r.URL.Query().Get("state")
+	cookie, err := r.Cookie(OauthStateCookieName)
+	return err != nil || state != cookie.Value || state != ""
 }
 
 type authPageData struct {

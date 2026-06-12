@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Protofarm/better-goth/internal/database"
+	"github.com/Protofarm/better-goth/internal/oauth-server/handlers"
 	"github.com/Protofarm/better-goth/internal/pb"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/golang-jwt/jwt/v5"
@@ -23,7 +24,6 @@ import (
 
 const (
 	minJWTSecretBytes       = 32
-	oauthStateCookieName    = "oauth_state"
 	oauthVerifierCookieName = "oauth_code_verifier"
 	oauthNonceCookieName    = "oauth_nonce"
 	authFlowCookieMaxAge    = 300
@@ -171,7 +171,7 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.setFlowCookie(w, oauthStateCookieName, state, 0)
+	a.setFlowCookie(w, handlers.OauthStateCookieName, state, 0)
 	a.setFlowCookie(w, oauthVerifierCookieName, codeVerifier, authFlowCookieMaxAge)
 	a.setFlowCookie(w, oauthNonceCookieName, nonce, authFlowCookieMaxAge)
 
@@ -433,7 +433,7 @@ func parseCallbackRequest(w http.ResponseWriter, r *http.Request) (string, strin
 }
 
 func validateCallbackState(w http.ResponseWriter, r *http.Request, state string) bool {
-	cookie, err := r.Cookie(oauthStateCookieName)
+	cookie, err := r.Cookie(handlers.OauthStateCookieName)
 	if err != nil {
 		http.Error(w, "state cookie missing", http.StatusBadRequest)
 		return false
@@ -443,7 +443,7 @@ func validateCallbackState(w http.ResponseWriter, r *http.Request, state string)
 		return false
 	}
 
-	clearCookie(w, oauthStateCookieName)
+	clearCookie(w, handlers.OauthStateCookieName)
 	return true
 }
 

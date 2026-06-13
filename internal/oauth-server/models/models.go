@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
 	"strings"
@@ -47,6 +48,22 @@ func (sl StringList) Value() (driver.Value, error) {
 	return strings.Join(sl, " "), nil
 }
 
+type Timestamps struct {
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+func (t *Timestamps) BeforeAppendModel(_ context.Context, query bun.Query) error {
+	switch query.(type) {
+	case *bun.InsertQuery:
+		t.CreatedAt = time.Now()
+		t.UpdatedAt = time.Now()
+	case *bun.UpdateQuery:
+		t.UpdatedAt = time.Now()
+	}
+	return nil
+}
+
 // map structs
 type AuthCode struct {
 	Code                string
@@ -77,17 +94,17 @@ type Token struct {
 type User struct {
 	bun.BaseModel `bun:"table:users,alias:u"`
 
-	ID             string    `bun:"id,pk,unique,type:varchar(255)" json:"id"`
-	Email          string    `bun:"email,unique,notnull" json:"email"`
-	PasswordHash   string    `bun:"password_hash" json:"-"`
-	Role           string    `bun:"role,notnull,default:'user'" json:"role"`
-	Audience       string    `bun:"audience,notnull,default:'mesh'" json:"aud"`
-	EmailConfirmed bool      `bun:"email_confirmed,notnull,default:false" json:"email_confirmed"`
-	Name           string    `bun:"name,unique" json:"username"`
-	GivenName      string    `bun:"given_name" json:"name"`
-	Picture        string    `bun:"picture" json:"avatar_url"`
-	CreatedAt      time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	ID             string `bun:"id,pk,unique,type:varchar(255)" json:"id"`
+	Email          string `bun:"email,unique,notnull" json:"email"`
+	PasswordHash   string `bun:"password_hash" json:"-"`
+	Role           string `bun:"role,notnull,default:'user'" json:"role"`
+	Audience       string `bun:"audience,notnull,default:'mesh'" json:"aud"`
+	EmailConfirmed bool   `bun:"email_confirmed,notnull,default:false" json:"email_confirmed"`
+	Name           string `bun:"name,unique" json:"username"`
+	GivenName      string `bun:"given_name" json:"name"`
+	Picture        string `bun:"picture" json:"avatar_url"`
+
+	Timestamps
 
 	Identities []*UserIdentity `bun:"rel:has-many,join:id=user_id"`
 }
@@ -100,8 +117,7 @@ type UserIdentity struct {
 	Sub      string `bun:"sub,notnull,unique:sub_provider_idx" json:"sub"`
 	Provider string `bun:"provider,notnull,unique:sub_provider_idx" json:"provider"`
 
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	Timestamps
 
 	User   *User      `bun:"rel:belongs-to,join:user_id=id"`
 	Tokens []*DBToken `bun:"rel:has-many,join:id=identity_id"`
@@ -120,7 +136,8 @@ type DBToken struct {
 	Nonce        string    `bun:"nonce"`
 	ClientID     string    `bun:"client_id"`
 	ExpiresAt    time.Time `bun:"expires_at"`
-	CreatedAt    time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+
+	Timestamps
 
 	Identity *UserIdentity `bun:"rel:belongs-to,join:identity_id=id"`
 }
@@ -132,11 +149,10 @@ type Client struct {
 	UserID            string     `bun:"user_id,unique,notnull,type:varchar(255)" json:"user_id"`
 	ClientSecret      string     `bun:"client_secret,notnull,type:varchar(255)" json:"client_secret,omitempty"`
 	PublicKeyEndpoint string     `bun:"public_key,type:text" json:"public_key"`
-	RedirectURIs      StringList `bun:"redirect_uris,type:text" json:"redirect_uris"` // Stored as plain text
+	RedirectURIs      StringList `bun:"redirect_uris,type:text" json:"redirect_uris"`
 	Scopes            StringList `bun:"scopes,type:text" json:"scopes"`
 
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
+	Timestamps
 
 	User *User `bun:"rel:belongs-to,join:user_id=id" json:"-"`
 }

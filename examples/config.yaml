@@ -12,8 +12,6 @@ providers:
     client_id: "my-client"
     client_secret: "${OAUTH_SERVER_CLIENT_SECRET}"
     key_dir: "./keys"
-    auth_html_path: "./templates/auth.html"
-    verifyemail_html_path: "./templates/verifyemail.html"
     redirect_uris:
       - "http://localhost:3000/callback/oauthserver"
     cors_origins:
@@ -35,7 +33,7 @@ jwt:
   cookie_name: "session_id"
 
 storage:
-  type: "memory" # memory, mysql, postgres, sqlite
+  type: "mysql" # memory, mysql, postgres, sqlite
   connection_string: "${CONNECTION_STRING}"
 
 logging:

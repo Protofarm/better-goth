@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"html/template"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -20,12 +20,7 @@ import (
 
 const OauthStateCookieName = "oauth_state"
 
-func AuthorizeHandler(s *store.Store, devMode bool, templatePath string, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) http.HandlerFunc {
-	if authPageTemplate == nil {
-		if err := InitAuthTemplate(templatePath); err != nil {
-			panic("failed to load auth template: " + err.Error())
-		}
-	}
+func AuthorizeHandler(s *store.Store, devMode bool, km *keys.KeyManager, issuer string, mailer *smtp.Mailer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		req := readAuthorizeRequest(r)
 		if !validateAuthorizeRequest(w, r, s, req, devMode) {
@@ -33,7 +28,7 @@ func AuthorizeHandler(s *store.Store, devMode bool, templatePath string, km *key
 		}
 
 		if r.Method != http.MethodPost {
-			renderAuthorizePage(w, req, authFormState{})
+			http.Error(w, errs.JSONErrMethodNotAllowed, http.StatusMethodNotAllowed)
 			return
 		}
 
@@ -50,14 +45,6 @@ type authorizeRequest struct {
 	Nonce               string
 	CodeChallenge       string
 	CodeChallengeMethod string
-}
-
-type authFormState struct {
-	ErrorMessage   string
-	Username       string
-	SignupUsername string
-	SignupEmail    string
-	SignupName     string
 }
 
 func readAuthorizeRequest(r *http.Request) authorizeRequest {
@@ -124,7 +111,8 @@ func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.
 
 	user, formState, isNew, err := authorizeUserFromForm(s, r)
 	if err != nil {
-		renderAuthorizePage(w, req, formState)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, formState)
 		return
 	}
 
@@ -145,7 +133,7 @@ func handleAuthorizeSubmission(w http.ResponseWriter, r *http.Request, s *store.
 	}
 }
 
-func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authFormState, bool, error) {
+func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, string, bool, error) {
 	signupUsername := r.FormValue("signup_username")
 	if signupUsername != "" {
 		user := &models.User{
@@ -156,34 +144,21 @@ func authorizeUserFromForm(s *store.Store, r *http.Request) (*models.User, authF
 		}
 		ok := validateCallbackState(r)
 		if !ok {
-			return nil, authFormState{
-				ErrorMessage:   "Invalid State Cookie",
-				SignupUsername: signupUsername,
-				SignupEmail:    r.FormValue("signup_email"),
-				SignupName:     r.FormValue("signup_name"),
-			}, false, errors.New("invalid state")
+			return nil, errs.JSONErrInvalidState, false, errors.New("invalid state")
 		}
 		if err := s.CreateUser(user); err != nil {
-			return nil, authFormState{
-				ErrorMessage:   "Username or email already taken.",
-				SignupUsername: signupUsername,
-				SignupEmail:    r.FormValue("signup_email"),
-				SignupName:     r.FormValue("signup_name"),
-			}, false, err
+			return nil, errs.JSONErrUserAlreadyExists, false, err
 		}
-		return user, authFormState{}, true, nil
+		return user, "", true, nil
 	}
 
 	username := r.FormValue("username")
 	user, err := s.GetUserByCredentials(username, r.FormValue("password"))
 	if err != nil {
-		return nil, authFormState{
-			ErrorMessage: "Invalid username or password.",
-			Username:     username,
-		}, false, err
+		return nil, errs.JSONErrUnauthorized, false, err
 	}
 
-	return user, authFormState{}, false, nil
+	return user, "", false, nil
 }
 
 func redirectAuthorizedUser(w http.ResponseWriter, r *http.Request, s *store.Store, user *models.User, req authorizeRequest) error {
@@ -234,24 +209,6 @@ func authorizationRedirectURL(redirectURI, code, state string) (string, error) {
 	return dest.String(), nil
 }
 
-func renderAuthorizePage(w http.ResponseWriter, req authorizeRequest, formState authFormState) {
-	renderAuthPage(w, authPageData{
-		Title:               "Sign in to continue",
-		ErrorMessage:        formState.ErrorMessage,
-		ClientID:            req.ClientID,
-		RedirectURI:         req.RedirectURI,
-		State:               req.State,
-		Scope:               req.Scope,
-		Nonce:               req.Nonce,
-		CodeChallenge:       req.CodeChallenge,
-		CodeChallengeMethod: req.CodeChallengeMethod,
-		Username:            formState.Username,
-		SignupUsername:      formState.SignupUsername,
-		SignupEmail:         formState.SignupEmail,
-		SignupName:          formState.SignupName,
-	})
-}
-
 func isValidRedirect(allowed []string, uri string, devMode bool) bool {
 	parsedURI, err := url.Parse(uri)
 	if err != nil {
@@ -277,37 +234,4 @@ func validateCallbackState(r *http.Request) bool {
 	state := r.URL.Query().Get("state")
 	cookie, err := r.Cookie(OauthStateCookieName)
 	return err != nil || state != cookie.Value || state != ""
-}
-
-type authPageData struct {
-	Title               string
-	ErrorMessage        string
-	SuccessMessage      string
-	ClientID            string
-	RedirectURI         string
-	State               string
-	Scope               string
-	Nonce               string
-	CodeChallenge       string
-	CodeChallengeMethod string
-	Username            string
-	SignupUsername      string
-	SignupEmail         string
-	SignupName          string
-	StandaloneSignup    bool
-}
-
-var authPageTemplate *template.Template
-
-func InitAuthTemplate(templatePath string) error {
-	var err error
-	authPageTemplate, err = template.ParseFiles(templatePath)
-	return err
-}
-
-func renderAuthPage(w http.ResponseWriter, data authPageData) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := authPageTemplate.Execute(w, data); err != nil {
-		http.Error(w, "failed to render auth page", http.StatusInternalServerError)
-	}
 }

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"html/template"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -27,7 +27,7 @@ func GenerateEmailVerificationToken(userID string, km *keys.KeyManager, issuer s
 	return token.SignedString(keyInfo.GetPrivateKey())
 }
 
-func VerifyEmailHandler(s *store.Store, km *keys.KeyManager, templatePath string) http.HandlerFunc {
+func VerifyEmailHandler(s *store.Store, km *keys.KeyManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tokenStr := r.URL.Query().Get("token")
 		if tokenStr == "" {
@@ -72,12 +72,14 @@ func VerifyEmailHandler(s *store.Store, km *keys.KeyManager, templatePath string
 
 		log.Printf("email verified: sub=%s email=%s", userID, user.Email)
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		tmpl, err := template.ParseFiles(templatePath)
-		if err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+
+		w.WriteHeader(http.StatusOK)
+
+		if err := json.NewEncoder(w).Encode(user); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		tmpl.Execute(w, user)
+
 	}
 }

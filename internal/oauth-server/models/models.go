@@ -47,7 +47,7 @@ func (sl StringList) Value() (driver.Value, error) {
 	return strings.Join(sl, " "), nil
 }
 
-// in-map structs
+// map structs
 type AuthCode struct {
 	Code                string
 	ClientID            string
@@ -80,14 +80,14 @@ type User struct {
 	ID             string    `bun:"id,pk,unique,type:varchar(255)" json:"id"`
 	Email          string    `bun:"email,unique,notnull" json:"email"`
 	PasswordHash   string    `bun:"password_hash" json:"-"`
-	Role           string    `bun:"role,notnull,default:'user'"`
-	Audience       string    `bun:"audience,notnull,default:'mesh'"`
-	EmailConfirmed bool      `bun:"email_confirmed,notnull,default:false"`
+	Role           string    `bun:"role,notnull,default:'user'" json:"role"`
+	Audience       string    `bun:"audience,notnull,default:'mesh'" json:"aud"`
+	EmailConfirmed bool      `bun:"email_confirmed,notnull,default:false" json:"email_confirmed"`
 	Name           string    `bun:"name,unique" json:"username"`
 	GivenName      string    `bun:"given_name" json:"name"`
 	Picture        string    `bun:"picture" json:"avatar_url"`
-	CreatedAt      time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	CreatedAt      time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt      time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
 
 	Identities []*UserIdentity `bun:"rel:has-many,join:id=user_id"`
 }
@@ -95,13 +95,13 @@ type User struct {
 type UserIdentity struct {
 	bun.BaseModel `bun:"table:user_identities,alias:ui"`
 
-	ID       string `bun:"id,pk,unique,type:varchar(255)"`
+	ID       string `bun:"id,pk,unique,type:varchar(255)" json:"ui_id"`
 	UserID   string `bun:"user_id,notnull,type:varchar(255)"`
-	Sub      string `bun:"sub,notnull,unique:sub_provider_idx"`
-	Provider string `bun:"provider,notnull,unique:sub_provider_idx"`
+	Sub      string `bun:"sub,notnull,unique:sub_provider_idx" json:"sub"`
+	Provider string `bun:"provider,notnull,unique:sub_provider_idx" json:"provider"`
 
-	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
 
 	User   *User      `bun:"rel:belongs-to,join:user_id=id"`
 	Tokens []*DBToken `bun:"rel:has-many,join:id=identity_id"`
@@ -136,7 +136,7 @@ type Client struct {
 	Scopes            StringList `bun:"scopes,type:text" json:"scopes"`
 
 	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp" json:"updated_at"`
 
 	User *User `bun:"rel:belongs-to,join:user_id=id" json:"-"`
 }

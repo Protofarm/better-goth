@@ -176,19 +176,6 @@ func (a *Auth) authHandler(w http.ResponseWriter, r *http.Request) {
 	a.setFlowCookie(w, oauthNonceCookieName, nonce, authFlowCookieMaxAge)
 
 	config := provider.Config()
-	customClientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
-	customClientSecret := strings.TrimSpace(r.URL.Query().Get("client_secret"))
-	if customClientID != "" && customClientSecret != "" {
-		a.setFlowCookie(w, "oauth_custom_client_id", customClientID, authFlowCookieMaxAge)
-		a.setFlowCookie(w, "oauth_custom_client_secret", customClientSecret, authFlowCookieMaxAge)
-		cfg := *config // copy
-		cfg.ClientID = customClientID
-		cfg.ClientSecret = customClientSecret
-		config = &cfg
-	} else {
-		clearCookie(w, "oauth_custom_client_id")
-		clearCookie(w, "oauth_custom_client_secret")
-	}
 
 	authURL := config.AuthCodeURL(state,
 		oauth2.SetAuthURLParam("code_challenge", codeChallenge),
@@ -334,30 +321,6 @@ func (a *Auth) callbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	config := provider.Config()
 	verifier := provider.Verifier()
-
-	var customClientID, customClientSecret string
-	if cookieID, err := r.Cookie("oauth_custom_client_id"); err == nil {
-		customClientID = cookieID.Value
-	}
-	if cookieSec, err := r.Cookie("oauth_custom_client_secret"); err == nil {
-		customClientSecret = cookieSec.Value
-	}
-
-	clearCookie(w, "oauth_custom_client_id")
-	clearCookie(w, "oauth_custom_client_secret")
-
-	if customClientID != "" && customClientSecret != "" {
-		cfg := *config // copy
-		cfg.ClientID = customClientID
-		cfg.ClientSecret = customClientSecret
-		config = &cfg
-
-		if customizer, ok := provider.(interface {
-			VerifierForClientID(clientID string) *oidc.IDTokenVerifier
-		}); ok {
-			verifier = customizer.VerifierForClientID(customClientID)
-		}
-	}
 
 	token, ok := exchangeCallbackToken(w, r, config, code)
 	if !ok {

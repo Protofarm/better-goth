@@ -86,6 +86,7 @@ type Token struct {
 	Nonce        string
 	UserID       string
 	ClientID     string
+	TokenUse     string
 	Revoked      bool
 	ExpiresAt    time.Time
 }
@@ -128,9 +129,11 @@ type DBToken struct {
 
 	ID           string    `bun:"id,pk,unique,type:varchar(255)"`
 	IdentityID   string    `bun:"identity_id,notnull,type:varchar(255)"`
+	UserID       string    `bun:"user_id,type:varchar(255)"`
 	AccessToken  string    `bun:"access_token,notnull"`
 	RefreshToken string    `bun:"refresh_token"`
 	TokenType    string    `bun:"token_type"`
+	TokenUse     string    `bun:"token_use,type:varchar(32)"`
 	ExpiresIn    int       `bun:"expires_in"`
 	Scope        string    `bun:"scope"`
 	Nonce        string    `bun:"nonce"`
@@ -140,6 +143,41 @@ type DBToken struct {
 	Timestamps
 
 	Identity *UserIdentity `bun:"rel:belongs-to,join:identity_id=id"`
+}
+
+func (t *DBToken) ToToken() *Token {
+	if t == nil {
+		return nil
+	}
+	use := t.TokenUse
+	if use == "" {
+		use = "access"
+	}
+	return &Token{
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+		TokenType:    t.TokenType,
+		ExpiresIn:    t.ExpiresIn,
+		Scope:        t.Scope,
+		Nonce:        t.Nonce,
+		UserID:       t.UserID,
+		ClientID:     t.ClientID,
+		TokenUse:     use,
+		ExpiresAt:    t.ExpiresAt,
+	}
+}
+
+type PasswordReset struct {
+	bun.BaseModel `bun:"table:password_resets,alias:pr"`
+
+	ID        string    `bun:"id,pk,unique,type:varchar(255)"`
+	UserID    string    `bun:"user_id,notnull,type:varchar(255)"`
+	Email     string    `bun:"email,notnull"`
+	CodeHash  string    `bun:"code_hash,notnull"`
+	ExpiresAt time.Time `bun:"expires_at,notnull"`
+	Used      bool      `bun:"used,notnull,default:false"`
+
+	Timestamps
 }
 
 type Client struct {

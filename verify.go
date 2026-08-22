@@ -17,9 +17,12 @@ var (
 )
 
 type VerifiedUser struct {
-	Subject string
-	Claims  jwt.RegisteredClaims
-	Token   string
+	Subject  string
+	Claims   jwt.RegisteredClaims
+	Token    string
+	TokenUse string
+	Email    string
+	Scope    string
 }
 
 type verifiedUserContextKey struct{}

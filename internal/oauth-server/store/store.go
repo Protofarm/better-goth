@@ -2,12 +2,15 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Protofarm/better-goth/internal/database"
 	"github.com/Protofarm/better-goth/internal/oauth-server/models"
@@ -16,18 +19,27 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const (
+	MinPasswordLength = 8
+	bcryptCost        = 12
+	otpTTL            = 10 * time.Minute
+)
+
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrPasswordTooShort   = fmt.Errorf("password must be at least %d characters", MinPasswordLength)
+	ErrUserExists         = errors.New("email already registered")
+	ErrUsernameExists     = errors.New("username already exists")
+	ErrClientNotFound     = errors.New("client not found")
+	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidOTP         = errors.New("invalid or expired code")
+)
+
 type Store struct {
 	db *database.Instance
 
-	// in-memory or cached
 	codesMu sync.RWMutex
 	codes   map[string]*models.AuthCode
-
-	tokensMu sync.RWMutex
-	tokens   map[string]*models.Token
-
-	refreshMu sync.RWMutex
-	refresh   map[string]*models.Token
 }
 
 type Config struct {
@@ -39,24 +51,24 @@ type Config struct {
 
 func NewStore(db *database.Instance, cfg Config) *Store {
 	s := &Store{
-		db:      db,
-		codes:   make(map[string]*models.AuthCode),
-		tokens:  make(map[string]*models.Token),
-		refresh: make(map[string]*models.Token),
+		db:    db,
+		codes: make(map[string]*models.AuthCode),
 	}
 	s.seed(cfg)
 	return s
 }
 
-// hashPassword hashes a password using bcrypt with cost 12
 func hashPassword(password string) (string, error) {
-	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	return string(hashed), err
 }
 
-// verifyPassword compares a plaintext password with a bcrypt hash
 func verifyPassword(hash, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
+
+func secureCompare(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func (s *Store) seed(cfg Config) {
@@ -67,6 +79,9 @@ func (s *Store) seed(cfg Config) {
 
 	clientSecret := strings.TrimSpace(cfg.DefaultClientSecret)
 	if clientSecret == "" {
+		if !cfg.DevMode {
+			log.Printf("oauth client secret is empty; set providers.oauthserver.client_secret")
+		}
 		clientSecret = "my-secret"
 	}
 
@@ -80,10 +95,44 @@ func (s *Store) seed(cfg Config) {
 	if len(redirectURIs) == 0 {
 		redirectURIs = []string{"http://localhost:3000/callback/oauthserver"}
 	}
+
+	owner, err := s.db.GetUserByEmail("oauth-client@localhost")
+	if err != nil {
+		owner = &models.User{
+			Name:         "oauth-client",
+			PasswordHash: randomPassword(),
+			Email:        "oauth-client@localhost",
+			GivenName:    "OAuth Client",
+		}
+		if err := s.CreateUser(owner); err != nil {
+			if existing, getErr := s.db.GetUserByEmail(owner.Email); getErr == nil {
+				owner = existing
+			} else {
+				log.Printf("Unable to create oauth client owner: %v", err)
+				return
+			}
+		}
+	}
+
+	if _, err := s.db.GetClientByID(clientID); err != nil {
+		if err := s.db.CreateClient(&models.Client{
+			ID:           clientID,
+			UserID:       owner.ID,
+			ClientSecret: clientSecret,
+			RedirectURIs: redirectURIs,
+			Scopes:       []string{"openid", "profile", "email"},
+		}); err != nil {
+			log.Printf("Unable to create oauth client: %v", err)
+		}
+	}
+
+	if !cfg.DevMode {
+		return
+	}
+
 	u := &models.User{
-		ID:           "user-001",
 		Name:         "john",
-		PasswordHash: "secret",
+		PasswordHash: "password1",
 		Email:        "john@example.com",
 		GivenName:    "John Doe",
 		Picture:      "https://avatars.githubusercontent.com/u/1?v=4",
@@ -91,20 +140,29 @@ func (s *Store) seed(cfg Config) {
 	if err := s.CreateUser(u); err != nil {
 		log.Printf("Unable to create dummy user: %v", err)
 	}
+}
 
-	if err := s.db.CreateClient(&models.Client{
-		ID:           clientID,
-		UserID:       u.ID,
-		ClientSecret: clientSecret,
-		RedirectURIs: redirectURIs,
-		Scopes:       []string{"openid", "profile", "email"},
-	}); err != nil {
-		log.Printf("Unable to create dummy client: %v", err)
+func randomPassword() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "dev-only-change-me-please"
 	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func (s *Store) CreateUser(user *models.User) error {
-	user.ID = uuid.New().String()
+	if len(user.PasswordHash) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	if user.ID == "" {
+		user.ID = uuid.New().String()
+	}
+	user.Email = strings.ToLower(strings.TrimSpace(user.Email))
+	user.Name = strings.TrimSpace(user.Name)
+	if user.Name == "" {
+		user.Name = user.Email
+	}
+
 	hash, err := hashPassword(user.PasswordHash)
 	if err != nil {
 		return err
@@ -115,16 +173,15 @@ func (s *Store) CreateUser(user *models.User) error {
 		if strings.Contains(err.Error(), "duplicate key") ||
 			strings.Contains(err.Error(), "UNIQUE constraint") {
 			if strings.Contains(err.Error(), "name") {
-				return errors.New("username already exists")
+				return ErrUsernameExists
 			}
 			if strings.Contains(err.Error(), "email") {
-				return errors.New("email already registered")
+				return ErrUserExists
 			}
 		}
 		return err
 	}
 
-	// create oauthuser entry
 	ui := &models.UserIdentity{
 		ID:       uuid.New().String(),
 		UserID:   user.ID,
@@ -136,7 +193,6 @@ func (s *Store) CreateUser(user *models.User) error {
 			strings.Contains(err.Error(), "UNIQUE constraint") {
 			return errors.New("user identity already exists")
 		}
-
 		return err
 	}
 
@@ -148,21 +204,32 @@ func (s *Store) ConfirmUserEmail(userID string) error {
 }
 
 func (s *Store) GetUserByCredentials(username, password string) (*models.User, error) {
-	u, err := s.db.GetUserByName(username)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("User not found")
+	username = strings.TrimSpace(username)
+	lookup := strings.ToLower(username)
+
+	var (
+		u   *models.User
+		err error
+	)
+	if strings.Contains(lookup, "@") {
+		u, err = s.db.GetUserByEmail(lookup)
+	} else {
+		u, err = s.db.GetUserByName(username)
+		if err != nil && errors.Is(err, sql.ErrNoRows) {
+			u, err = s.db.GetUserByEmail(lookup)
 		}
-		return nil, err
+	}
+	if err != nil {
+		_ = bcrypt.CompareHashAndPassword([]byte("$2a$12$0123456789abcdef012345u0h6s9t1u2v3w4x5y6z7a8b9c0d1e2"), []byte(password))
+		return nil, ErrInvalidCredentials
 	}
 
-	ok := s.db.CheckUserIdentityExists(u.ID)
-	if !ok {
-		return nil, errors.New("invalid login method")
+	if !s.db.CheckUserIdentityExists(u.ID) {
+		return nil, ErrInvalidCredentials
 	}
 
 	if err := verifyPassword(u.PasswordHash, password); err != nil {
-		return nil, errors.New("invalid credentials")
+		return nil, ErrInvalidCredentials
 	}
 	return u, nil
 }
@@ -171,10 +238,40 @@ func (s *Store) GetUserByID(id string) (*models.User, error) {
 	user, err := s.db.GetUserByID(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, errors.New("User not found")
+			return nil, ErrUserNotFound
 		}
+		return nil, err
 	}
 	return user, nil
+}
+
+func (s *Store) GetUserByEmail(email string) (*models.User, error) {
+	user, err := s.db.GetUserByEmail(strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return user, nil
+}
+
+func (s *Store) UpdatePassword(userID, plaintext string) error {
+	if len(plaintext) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	hash, err := hashPassword(plaintext)
+	if err != nil {
+		return err
+	}
+	if err := s.db.UpdateUserPassword(userID, hash); err != nil {
+		return err
+	}
+	return s.RevokeAllForUser(userID)
+}
+
+func (s *Store) DeleteUser(userID string) error {
+	return s.db.DeleteUser(userID)
 }
 
 func (s *Store) GetClient(id string) (*models.Client, error) {
@@ -182,7 +279,18 @@ func (s *Store) GetClient(id string) (*models.Client, error) {
 	if err == nil {
 		return client, nil
 	}
-	return nil, errors.New("client not found")
+	return nil, ErrClientNotFound
+}
+
+func (s *Store) AuthenticateClient(id, secret string) (*models.Client, error) {
+	client, err := s.GetClient(id)
+	if err != nil {
+		return nil, err
+	}
+	if !secureCompare(client.ClientSecret, secret) {
+		return nil, errors.New("client authentication failed")
+	}
+	return client, nil
 }
 
 func (s *Store) GetClientByUserID(userID string) (*models.Client, error) {
@@ -191,6 +299,7 @@ func (s *Store) GetClientByUserID(userID string) (*models.Client, error) {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("Client not found")
 		}
+		return nil, err
 	}
 	return client, nil
 }
@@ -216,7 +325,6 @@ func (s *Store) UpdateClient(id, publicKeyEndpoint string, scope, redirectURIs [
 			return nil, err
 		}
 		existingClient.ClientSecret = secret
-		log.Printf("Updated client %s. Regenerated secret: %s", id, secret)
 	}
 
 	err = s.db.UpdateClient(existingClient)
@@ -247,7 +355,6 @@ func (s *Store) CreateClient(userID, publicKeyEndpoint string, scopes, redirectU
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Created client %s for user %s. Generated secret: %s", client.ID, userID, secret)
 	return client, nil
 }
 
@@ -264,66 +371,161 @@ func (s *Store) PopCode(code string) (*models.AuthCode, error) {
 	if !ok {
 		return nil, errors.New("code not found")
 	}
-	delete(s.codes, code) // single-use
+	delete(s.codes, code)
 	return c, nil
 }
 
-func (s *Store) SaveToken(t *models.Token) {
-	s.tokensMu.Lock()
-	s.tokens[t.AccessToken] = t
-	s.tokensMu.Unlock()
+func (s *Store) identityIDForUser(userID string) (string, error) {
+	identity, err := s.db.GetIdentityByUserID(userID)
+	if err == nil {
+		return identity.ID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	ui := &models.UserIdentity{
+		ID:       uuid.New().String(),
+		UserID:   userID,
+		Sub:      userID,
+		Provider: providers.OAuthServerProviderName,
+	}
+	if err := s.db.CreateUserIdentity(ui); err != nil {
+		return "", err
+	}
+	return ui.ID, nil
+}
 
-	if t.RefreshToken != "" {
-		s.refreshMu.Lock()
-		s.refresh[t.RefreshToken] = t
-		s.refreshMu.Unlock()
+func (s *Store) SaveToken(t *models.Token) {
+	if t == nil {
+		return
+	}
+	identityID, err := s.identityIDForUser(t.UserID)
+	if err != nil {
+		log.Printf("failed to resolve identity for token persist: %v", err)
+		identityID = t.UserID
+	}
+	use := t.TokenUse
+	if use == "" {
+		use = "access"
+	}
+	row := &models.DBToken{
+		ID:           uuid.New().String(),
+		IdentityID:   identityID,
+		UserID:       t.UserID,
+		AccessToken:  t.AccessToken,
+		RefreshToken: t.RefreshToken,
+		TokenType:    t.TokenType,
+		TokenUse:     use,
+		ExpiresIn:    t.ExpiresIn,
+		Scope:        t.Scope,
+		Nonce:        t.Nonce,
+		ClientID:     t.ClientID,
+		ExpiresAt:    t.ExpiresAt,
+	}
+	if err := s.db.SaveToken(row); err != nil {
+		log.Printf("failed to persist token: %v", err)
 	}
 }
 
 func (s *Store) GetByAccessToken(token string) (*models.Token, error) {
-	s.tokensMu.RLock()
-	defer s.tokensMu.RUnlock()
-	t, ok := s.tokens[token]
-	if !ok {
-		return nil, errors.New("access token not found")
+	row, err := s.db.GetTokenByAccess(token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("access token not found")
+		}
+		return nil, err
 	}
-	return t, nil
+	return row.ToToken(), nil
 }
 
 func (s *Store) GetByRefreshToken(token string) (*models.Token, error) {
-	s.refreshMu.RLock()
-	defer s.refreshMu.RUnlock()
-	t, ok := s.refresh[token]
-	if !ok {
-		return nil, errors.New("refresh token not found")
+	row, err := s.db.GetTokenByRefresh(token)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("refresh token not found")
+		}
+		return nil, err
 	}
-	return t, nil
+	return row.ToToken(), nil
 }
 
 func (s *Store) RevokeAccessToken(token string) {
-	s.tokensMu.Lock()
-	t, ok := s.tokens[token]
-	delete(s.tokens, token)
-	s.tokensMu.Unlock()
-
-	if ok && t.RefreshToken != "" {
-		s.refreshMu.Lock()
-		delete(s.refresh, t.RefreshToken)
-		s.refreshMu.Unlock()
+	if err := s.db.DeleteTokenByAccessOrRefresh(token, ""); err != nil {
+		log.Printf("failed to revoke access token: %v", err)
 	}
 }
 
 func (s *Store) RevokeRefreshToken(token string) {
-	s.refreshMu.Lock()
-	t, ok := s.refresh[token]
-	delete(s.refresh, token)
-	s.refreshMu.Unlock()
-
-	if ok {
-		s.tokensMu.Lock()
-		delete(s.tokens, t.AccessToken)
-		s.tokensMu.Unlock()
+	if err := s.db.DeleteTokenByAccessOrRefresh("", token); err != nil {
+		log.Printf("failed to revoke refresh token: %v", err)
 	}
+}
+
+func (s *Store) Revoke(token string) {
+	if token == "" {
+		return
+	}
+	if err := s.db.DeleteTokenByAccessOrRefresh(token, token); err != nil {
+		log.Printf("failed to revoke token: %v", err)
+	}
+}
+
+func (s *Store) RevokePair(access, refresh string) {
+	if err := s.db.DeleteTokenByAccessOrRefresh(access, refresh); err != nil {
+		log.Printf("failed to revoke token pair: %v", err)
+	}
+}
+
+func (s *Store) RevokeAllForUser(userID string) error {
+	return s.db.DeleteTokensByUserID(userID)
+}
+
+func (s *Store) CreatePasswordReset(email string) (string, error) {
+	n := make([]byte, 4)
+	if _, err := rand.Read(n); err != nil {
+		return "", err
+	}
+	codeNum := int(n[0])<<16 | int(n[1])<<8 | int(n[2])
+	code := fmt.Sprintf("%06d", codeNum%1000000)
+
+	user, err := s.GetUserByEmail(email)
+	if err != nil {
+		_, _ = hashPassword(code)
+		return code, nil
+	}
+
+	hash, err := hashPassword(code)
+	if err != nil {
+		return "", err
+	}
+	pr := &models.PasswordReset{
+		ID:        uuid.New().String(),
+		UserID:    user.ID,
+		Email:     user.Email,
+		CodeHash:  hash,
+		ExpiresAt: time.Now().Add(otpTTL),
+	}
+	if err := s.db.SavePasswordReset(pr); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func (s *Store) ConsumePasswordReset(email, code string) (*models.User, error) {
+	pr, err := s.db.LatestPasswordReset(strings.ToLower(strings.TrimSpace(email)))
+	if err != nil {
+		return nil, ErrInvalidOTP
+	}
+	if pr.Used || time.Now().After(pr.ExpiresAt) {
+		return nil, ErrInvalidOTP
+	}
+	if err := verifyPassword(pr.CodeHash, strings.TrimSpace(code)); err != nil {
+		return nil, ErrInvalidOTP
+	}
+	if err := s.db.MarkPasswordResetUsed(pr.ID); err != nil {
+		return nil, err
+	}
+	return s.GetUserByID(pr.UserID)
 }
 
 func generateClientSecret(size int) (string, error) {
@@ -332,6 +534,5 @@ func generateClientSecret(size int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }

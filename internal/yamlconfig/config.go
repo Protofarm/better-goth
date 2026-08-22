@@ -23,15 +23,17 @@ type Config struct {
 
 	Providers struct {
 		OAuthServer struct {
-			Enabled      bool     `yaml:"enabled"`
-			Port         string   `yaml:"port"`
-			IssuerURL    string   `yaml:"issuer_url"`
-			ClientID     string   `yaml:"client_id"`
-			ClientSecret string   `yaml:"client_secret"`
-			KeyDir       string   `yaml:"key_dir"`
-			RedirectURIs []string `yaml:"redirect_uris"`
-			CORSOrigins  []string `yaml:"cors_origins"`
-			TLS          struct {
+			Enabled            bool     `yaml:"enabled"`
+			Port               string   `yaml:"port"`
+			IssuerURL          string   `yaml:"issuer_url"`
+			ClientID           string   `yaml:"client_id"`
+			ClientSecret       string   `yaml:"client_secret"`
+			KeyDir             string   `yaml:"key_dir"`
+			RedirectURIs       []string `yaml:"redirect_uris"`
+			CORSOrigins        []string `yaml:"cors_origins"`
+			AdminToken         string   `yaml:"admin_token"`
+			PrivateKeyJWTHosts []string `yaml:"private_key_jwt_hosts"`
+			TLS                struct {
 				Enabled  bool   `yaml:"enabled"`
 				CertPath string `yaml:"cert_path"`
 				KeyPath  string `yaml:"key_path"`

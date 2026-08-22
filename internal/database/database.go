@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/Protofarm/better-goth/internal/oauth-server/models"
 	"github.com/Protofarm/better-goth/internal/pb"
@@ -46,7 +48,7 @@ func InitDB(connType, connStr string) (*Instance, error) {
 	case "memory":
 		connType = sqliteshim.ShimName
 		d = sqlitedialect.New()
-		connStr = ":memory:"
+		connStr = fmt.Sprintf("file:mem%d?mode=memory&cache=shared", time.Now().UnixNano())
 	default:
 		return nil, errors.New("Invalid connection type.")
 	}
@@ -77,6 +79,7 @@ func InitDB(connType, connStr string) (*Instance, error) {
 		{(*models.UserIdentity)(nil), "user_identities"},
 		{(*models.DBToken)(nil), "tokens"},
 		{(*models.Client)(nil), "clients_info"},
+		{(*models.PasswordReset)(nil), "password_resets"},
 	}
 	for _, t := range tables {
 		if _, err := db.NewCreateTable().Model(t.model).IfNotExists().Exec(ctx); err != nil {
@@ -98,7 +101,7 @@ func (db *Instance) runWriter() {
 		err := db.DB.RunInTx(context.Background(), nil, func(ctx context.Context, tx bun.Tx) error {
 			return job(tx)
 		})
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			log.Printf("Write job error: %v", err)
 		}
 	}
@@ -311,6 +314,168 @@ func (db *Instance) UpdateClient(ci *models.Client) error {
 func (db *Instance) DeleteClient(id string) error {
 	return db.enqueue(func(tx bun.Tx) error {
 		_, err := tx.NewDelete().Model((*models.Client)(nil)).Where("id = ?", id).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) GetIdentityByUserID(userID string) (*models.UserIdentity, error) {
+	identity := new(models.UserIdentity)
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().
+			Model(identity).
+			Where("user_id = ?", userID).
+			Where("provider = ?", providers.OAuthServerProviderName).
+			Scan(context.Background())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+func (db *Instance) UpdateUserPassword(userID, passwordHash string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewUpdate().
+			Model((*models.User)(nil)).
+			Set("password_hash = ?", passwordHash).
+			Where("id = ?", userID).
+			Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) DeleteUser(userID string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		ctx := context.Background()
+		if _, err := tx.NewDelete().Model((*models.PasswordReset)(nil)).Where("user_id = ?", userID).Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewDelete().Model((*models.DBToken)(nil)).Where("user_id = ?", userID).Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewDelete().Model((*models.Client)(nil)).Where("user_id = ?", userID).Exec(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.NewDelete().Model((*models.UserIdentity)(nil)).Where("user_id = ?", userID).Exec(ctx); err != nil {
+			return err
+		}
+		_, err := tx.NewDelete().Model((*models.User)(nil)).Where("id = ?", userID).Exec(ctx)
+		return err
+	})
+}
+
+func (db *Instance) SaveToken(t *models.DBToken) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(t).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) GetTokenByAccess(token string) (*models.DBToken, error) {
+	t := new(models.DBToken)
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(t).Where("access_token = ?", token).Scan(context.Background())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (db *Instance) GetTokenByRefresh(token string) (*models.DBToken, error) {
+	t := new(models.DBToken)
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().Model(t).Where("refresh_token = ?", token).Scan(context.Background())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (db *Instance) DeleteTokenByAccess(token string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewDelete().Model((*models.DBToken)(nil)).Where("access_token = ?", token).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) DeleteTokenByRefresh(token string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewDelete().Model((*models.DBToken)(nil)).Where("refresh_token = ?", token).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) DeleteTokenByID(id string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewDelete().Model((*models.DBToken)(nil)).Where("id = ?", id).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) DeleteTokenByAccessOrRefresh(access, refresh string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		var (
+			res sql.Result
+			err error
+		)
+		switch {
+		case access != "" && refresh != "":
+			res, err = tx.NewRaw("DELETE FROM tokens WHERE access_token = ? OR refresh_token = ?", access, refresh).Exec(context.Background())
+		case access != "":
+			res, err = tx.NewRaw("DELETE FROM tokens WHERE access_token = ?", access).Exec(context.Background())
+		case refresh != "":
+			res, err = tx.NewRaw("DELETE FROM tokens WHERE refresh_token = ?", refresh).Exec(context.Background())
+		default:
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, _ = res.RowsAffected()
+		return nil
+	})
+}
+
+func (db *Instance) DeleteTokensByUserID(userID string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewDelete().Model((*models.DBToken)(nil)).Where("user_id = ?", userID).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) SavePasswordReset(pr *models.PasswordReset) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewInsert().Model(pr).Exec(context.Background())
+		return err
+	})
+}
+
+func (db *Instance) LatestPasswordReset(email string) (*models.PasswordReset, error) {
+	pr := new(models.PasswordReset)
+	err := db.enqueue(func(tx bun.Tx) error {
+		return tx.NewSelect().
+			Model(pr).
+			Where("email = ?", email).
+			Where("used = ?", false).
+			Order("created_at DESC").
+			Limit(1).
+			Scan(context.Background())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
+func (db *Instance) MarkPasswordResetUsed(id string) error {
+	return db.enqueue(func(tx bun.Tx) error {
+		_, err := tx.NewUpdate().
+			Model((*models.PasswordReset)(nil)).
+			Set("used = ?", true).
+			Where("id = ?", id).
+			Exec(context.Background())
 		return err
 	})
 }

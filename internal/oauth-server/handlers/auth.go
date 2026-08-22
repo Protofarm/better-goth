@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -233,5 +234,8 @@ func isValidRedirect(allowed []string, uri string, devMode bool) bool {
 func validateCallbackState(r *http.Request) bool {
 	state := r.URL.Query().Get("state")
 	cookie, err := r.Cookie(OauthStateCookieName)
-	return err != nil || state != cookie.Value || state != ""
+	if err != nil || cookie == nil || cookie.Value == "" || state == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(state), []byte(cookie.Value)) == 1
 }

@@ -13,10 +13,12 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
 	errs "github.com/Protofarm/better-goth/internal/oauth-server/errors"
 	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
@@ -24,7 +26,7 @@ import (
 	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 )
 
-func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.HandlerFunc {
+func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string, privateKeyJWTHosts []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			errs.TokenError(w, errs.CodeMethodNotAllowed, errs.MsgOnlyPostAllowed)
@@ -40,7 +42,7 @@ func TokenHandler(s *store.Store, km *keys.KeyManager, issuer string) http.Handl
 			return
 		}
 
-		client, ok := authenticateTokenClient(w, r, s, issuer)
+		client, ok := authenticateTokenClient(w, r, s, issuer, privateKeyJWTHosts)
 		if !ok {
 			return
 		}
@@ -71,11 +73,11 @@ func parseGrantType(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return grantType, true
 }
 
-func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store, issuer string) (*models.Client, bool) {
+func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.Store, issuer string, privateKeyJWTHosts []string) (*models.Client, bool) {
 
 	// RFC 7523 private_key_jwt
 	if r.FormValue("client_assertion") != "" {
-		client, err := authenticatePrivateKeyJWT(r, s, issuer)
+		client, err := authenticatePrivateKeyJWT(r, s, issuer, privateKeyJWTHosts)
 		if err != nil {
 			errs.TokenError(w, errs.CodeInvalidClient, err.Error())
 			return nil, false
@@ -92,8 +94,8 @@ func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.St
 		return nil, false
 	}
 
-	client, err := s.GetClient(clientID)
-	if err != nil || client.ClientSecret != clientSecret {
+	client, err := s.AuthenticateClient(clientID, clientSecret)
+	if err != nil {
 		w.Header().Set("WWW-Authenticate", `Basic realm="oauth"`)
 		errs.TokenError(w, errs.CodeInvalidClient, errs.MsgClientAuthFailed)
 		return nil, false
@@ -102,7 +104,7 @@ func authenticateTokenClient(w http.ResponseWriter, r *http.Request, s *store.St
 	return client, true
 }
 
-func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (*models.Client, error) {
+func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string, allowedHosts []string) (*models.Client, error) {
 	assertion, err := validateClientAssertionRequest(r)
 	if err != nil {
 		return nil, err
@@ -122,7 +124,7 @@ func authenticatePrivateKeyJWT(r *http.Request, s *store.Store, issuer string) (
 		return nil, fmt.Errorf(errs.MsgUnknownClient)
 	}
 
-	clientPublicKey, err := fetchPublicKey(client.PublicKeyEndpoint, assertion)
+	clientPublicKey, err := fetchPublicKey(client.PublicKeyEndpoint, assertion, allowedHosts)
 	if err != nil {
 		return nil, fmt.Errorf(errs.MsgInvalidClientPublicKey)
 	}
@@ -333,6 +335,9 @@ func handleRefreshToken(s *store.Store, r *http.Request) (*models.Token, string,
 	if time.Now().After(old.ExpiresAt) {
 		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgRefreshTokenExpired)
 	}
+	if old.TokenUse == "device" || old.TokenUse == "recovery" {
+		return nil, errs.CodeInvalidGrant, fmt.Errorf(errs.MsgInvalidRefreshToken)
+	}
 
 	scope, err := resolveRequestedScope(r.FormValue("scope"), strings.Fields(old.Scope), old.Scope)
 	if err != nil {
@@ -361,20 +366,51 @@ func handleClientCredentials(client *models.Client, requestedScope string) (*mod
 }
 
 func newToken(userID, clientID, scope string) *models.Token {
+	return newTokenWith(userID, clientID, scope, time.Hour, "access", true)
+}
+
+func newTokenWith(userID, clientID, scope string, ttl time.Duration, tokenUse string, withRefresh bool) *models.Token {
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	if tokenUse == "" {
+		tokenUse = "access"
+	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		panic(fmt.Sprintf("failed to generate random token bytes: %v", err))
 	}
+	refresh := ""
+	if withRefresh {
+		rb := make([]byte, 32)
+		if _, err := rand.Read(rb); err != nil {
+			panic(fmt.Sprintf("failed to generate refresh token bytes: %v", err))
+		}
+		refresh = hex.EncodeToString(rb)
+	}
 	return &models.Token{
 		AccessToken:  hex.EncodeToString(b), // overwritten by JWT after signing
-		RefreshToken: hex.EncodeToString(b[:16]),
+		RefreshToken: refresh,
 		TokenType:    "Bearer",
-		ExpiresIn:    3600,
+		ExpiresIn:    int(ttl.Seconds()),
 		Scope:        scope,
 		UserID:       userID,
 		ClientID:     clientID,
-		ExpiresAt:    time.Now().Add(time.Hour),
+		TokenUse:     tokenUse,
+		ExpiresAt:    time.Now().Add(ttl),
 	}
+}
+
+// IssueUserTokens signs an RS256 access JWT (and optional refresh) and persists it.
+func IssueUserTokens(s *store.Store, km *keys.KeyManager, issuer, userID, clientID, scope, tokenUse string, ttl time.Duration, withRefresh bool) (*models.Token, error) {
+	if scope == "" {
+		scope = "openid profile email"
+	}
+	tok := newTokenWith(userID, clientID, scope, ttl, tokenUse, withRefresh)
+	if err := signAndStoreToken(s, tok, km.GetActiveKey(), issuer); err != nil {
+		return nil, err
+	}
+	return tok, nil
 }
 
 // signJWT creates a signed RS256 JWT using the token metadata as claims.
@@ -387,7 +423,11 @@ func signJWT(tok *models.Token, keyInfo keys.KeyInfo, issuer string) (string, er
 		"iat":       now.Unix(),
 		"exp":       now.Add(time.Duration(tok.ExpiresIn) * time.Second).Unix(),
 		"scope":     tok.Scope,
-		"token_use": "access",
+		"token_use": tok.TokenUse,
+		"jti":       uuid.NewString(),
+	}
+	if tok.TokenUse == "" {
+		claims["token_use"] = "access"
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = keyInfo.Kid
@@ -440,7 +480,7 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 		"azp":            tok.ClientID,
 		"picture":        user.Picture,
 		"email":          user.Email,
-		"email_verified": false,
+		"email_verified": user.EmailConfirmed,
 		"name":           user.Name,
 		"given_name":     givenName,
 		"at_hash":        atHash,
@@ -450,20 +490,34 @@ func signIDToken(tok *models.Token, s *store.Store, keyInfo keys.KeyInfo, issuer
 	if tok.Nonce != "" {
 		claims["nonce"] = tok.Nonce
 	}
-
-	if user.Email != "" {
-		claims["email_verified"] = true
-	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["kid"] = keyInfo.Kid
 	return token.SignedString(keyInfo.GetPrivateKey())
 }
 
 // TODO: implement caching on jwks response
-func fetchPublicKey(publicKeyEndpoint, assertion string) (string, error) {
+func fetchPublicKey(publicKeyEndpoint, assertion string, allowedHosts []string) (string, error) {
+	if len(allowedHosts) == 0 {
+		return "", fmt.Errorf("private_key_jwt is disabled")
+	}
+	parsed, err := url.Parse(publicKeyEndpoint)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid public key endpoint")
+	}
+	hostOK := false
+	for _, allowed := range allowedHosts {
+		if strings.EqualFold(strings.TrimSpace(allowed), parsed.Hostname()) {
+			hostOK = true
+			break
+		}
+	}
+	if !hostOK {
+		return "", fmt.Errorf("public key host not allowed")
+	}
+
 	assertionClaims, _, err := jwt.NewParser().ParseUnverified(assertion, jwt.MapClaims{})
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 	kid, _ := assertionClaims.Header["kid"].(string)
 

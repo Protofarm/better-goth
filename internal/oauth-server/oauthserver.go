@@ -14,18 +14,25 @@ import (
 )
 
 type ServerConfig struct {
-	Port         string
-	IssuerURL    string
-	KeyDir       string
-	ClientID     string
-	ClientSecret string
-	RedirectURIs []string
-	DevMode      bool
-	SMTPConfig   smtp.Config
-	CORSOrigins  []string
+	Port               string
+	IssuerURL          string
+	KeyDir             string
+	ClientID           string
+	ClientSecret       string
+	RedirectURIs       []string
+	DevMode            bool
+	SMTPConfig         smtp.Config
+	CORSOrigins        []string
+	AdminToken         string
+	PrivateKeyJWTHosts []string
 }
 
 func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (http.Handler, error) {
+	h, _, _, err := CreateOAuthRuntime(db, cfg)
+	return h, err
+}
+
+func CreateOAuthRuntime(db *database.Instance, cfg ServerConfig) (http.Handler, *store.Store, *keys.KeyManager, error) {
 	privateKM := keys.NewKeyManager(cfg.KeyDir)
 
 	s := store.NewStore(db, store.Config{
@@ -38,7 +45,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (http.Handler, e
 	mux := http.NewServeMux()
 	mailer := smtp.NewMailer(cfg.SMTPConfig)
 	mux.HandleFunc("/authorize", handlers.AuthorizeHandler(s, cfg.DevMode, privateKM, cfg.IssuerURL, mailer))
-	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, cfg.IssuerURL))
+	mux.HandleFunc("/oauth/token", handlers.TokenHandler(s, privateKM, cfg.IssuerURL, cfg.PrivateKeyJWTHosts))
 	mux.HandleFunc("/oauth/token/revocation", handlers.RevocationHandler(s))
 	mux.HandleFunc("/oauth/token/introspection", handlers.IntrospectionHandler(s, privateKM))
 	mux.HandleFunc("/oauth/verifyEmail", handlers.VerifyEmailHandler(s, privateKM))
@@ -46,7 +53,7 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (http.Handler, e
 	mux.Handle("/userinfo", requireAuth(handlers.UserInfoHandler(s)))
 	mux.HandleFunc("/.well-known/jwks.json", handlers.JWKSHandler(privateKM))
 	// admin endpoints
-	mux.HandleFunc("/admin/rotate", handlers.RotateHandler(privateKM))
+	mux.HandleFunc("/admin/rotate", handlers.RotateHandler(privateKM, cfg.AdminToken))
 	// OpenID Connect discovery document
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -92,5 +99,5 @@ func CreateOAuthServer(db *database.Instance, cfg ServerConfig) (http.Handler, e
 		}
 	})
 
-	return middleware.CORSWithOrigins(mux, cfg.CORSOrigins), nil
+	return middleware.CORSWithOrigins(mux, cfg.CORSOrigins), s, privateKM, nil
 }

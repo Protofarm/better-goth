@@ -16,7 +16,9 @@ import (
 
 	"github.com/Protofarm/better-goth/internal/database"
 	oauthserver "github.com/Protofarm/better-goth/internal/oauth-server"
+	"github.com/Protofarm/better-goth/internal/oauth-server/keys"
 	"github.com/Protofarm/better-goth/internal/oauth-server/smtp"
+	"github.com/Protofarm/better-goth/internal/oauth-server/store"
 	"github.com/Protofarm/better-goth/internal/pb"
 	"github.com/Protofarm/better-goth/internal/providers"
 	yamlconfig "github.com/Protofarm/better-goth/internal/yamlconfig"
@@ -76,6 +78,12 @@ type Runtime struct {
 	CookieSecure  bool
 	OAuthIssuer   string
 	OAuthClientID string
+
+	oauthHandler http.Handler
+	oauthStore   *store.Store
+	keyManager   *keys.KeyManager
+	db           *database.Instance
+	mailer       *smtp.Mailer
 }
 
 // Setup wires the oauth server and providers using the YAML config.
@@ -260,15 +268,17 @@ func (ctx *setupContext) startOAuthServer() error {
 	}
 
 	oauthServer, err := oauthserver.CreateOAuthServer(ctx.db, oauthserver.ServerConfig{
-		Port:         rc.OAuthPort,
-		IssuerURL:    rc.OAuthIssuer,
-		KeyDir:       rc.OAuthKeyDir,
-		ClientID:     rc.OAuthClientID,
-		ClientSecret: rc.OAuthClientSecret,
-		RedirectURIs: rc.OAuthRedirectURIs,
-		DevMode:      rc.DevMode,
-		SMTPConfig:   rc.SMTP,
-		CORSOrigins:  rc.OAuthCORSOrigins,
+		Port:               rc.OAuthPort,
+		IssuerURL:          rc.OAuthIssuer,
+		KeyDir:             rc.OAuthKeyDir,
+		ClientID:           rc.OAuthClientID,
+		ClientSecret:       rc.OAuthClientSecret,
+		RedirectURIs:       rc.OAuthRedirectURIs,
+		DevMode:            rc.DevMode,
+		SMTPConfig:         rc.SMTP,
+		CORSOrigins:        rc.OAuthCORSOrigins,
+		AdminToken:         ctx.cfg.Providers.OAuthServer.AdminToken,
+		PrivateKeyJWTHosts: ctx.cfg.Providers.OAuthServer.PrivateKeyJWTHosts,
 	})
 	if err != nil {
 		return err

@@ -45,8 +45,7 @@ func authenticateIntrospectionClient(w http.ResponseWriter, r *http.Request, s *
 		return "", false
 	}
 
-	client, err := s.GetClient(clientID)
-	if err != nil || client.ClientSecret != clientSecret {
+	if _, err := s.AuthenticateClient(clientID, clientSecret); err != nil {
 		errs.HTTPError(w, errs.JSONErrInvalidRequest, http.StatusBadRequest)
 		return "", false
 	}

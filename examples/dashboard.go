@@ -1,16 +1,19 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 
 	bettergoth "github.com/Protofarm/better-goth"
 )
 
 const (
-	appOwner                    = "App"
-	appRouteLibraryHandlerOwner = "App route -> library handler"
-	appRouteWithHookOwner       = "App route -> library handler + app hook"
+	ownerApp     = "App"
+	ownerLibrary = "App route → library handler"
+	ownerHook    = "App route → library handler + app hook"
 )
 
 type routeInfo struct {
@@ -20,66 +23,117 @@ type routeInfo struct {
 	Description string
 }
 
+// oauthClientInfo mirrors the OAuth server's client JSON response.
+type oauthClientInfo struct {
+	ID           string   `json:"id"`
+	ClientSecret string   `json:"client_secret"`
+	PublicKey    string   `json:"public_key"`
+	RedirectURIs []string `json:"redirect_uris"`
+	Scopes       []string `json:"scopes"`
+	CreatedAt    string   `json:"created_at"`
+}
+
 type dashboardData struct {
 	User         *bettergoth.VerifiedUser
 	UserDetails  *bettergoth.TokenRecord
-	AccessToken  string
 	Routes       []routeInfo
+	CookieName   string
 	CookieSecure bool
-}
-
-func route(method, path, owner, description string) routeInfo {
-	return routeInfo{
-		Method:      method,
-		Path:        path,
-		Owner:       owner,
-		Description: description,
-	}
+	Client       *oauthClientInfo
+	ClientError  string
+	Flash        string
+	OAuthIssuer  string
 }
 
 func dashboardRoutes() []routeInfo {
 	return []routeInfo{
-		route("GET", "/help", appOwner, "RFC 9650 RDAP help endpoint - advertises authentication capabilities with 'farv1' support"),
-		route("GET", "/", appOwner, "Homepage with login options"),
-		route("GET", "/login/oauthserver", appRouteLibraryHandlerOwner, "Starts OAuth 2.0 authorization code flow against the configured provider"),
-		route("GET", "/callback/oauthserver", appRouteWithHookOwner, "OAuth callback - better-goth validates tokens and the app handles the result hook"),
-		route("GET", "/dashboard", appOwner, "Protected dashboard showing route ownership and user details (session cookie auth)"),
-		route("GET", "/api/resource", appRouteLibraryHandlerOwner, "Protected resource endpoint using session cookie authentication (RFC 6750 via cookie)"),
-		route("GET", "/api/resource/bearer", appRouteLibraryHandlerOwner, "Protected resource endpoint using Bearer token (RFC 6750) from Authorization header"),
-		route("POST", "/signout", appRouteLibraryHandlerOwner, "Clears the JWT cookie and redirects to the homepage"),
-		route("POST", "/v1/tokens/store", appRouteLibraryHandlerOwner, "Stores a token record in the better-goth in-memory token store"),
-		route("GET", "/v1/tokens", appRouteLibraryHandlerOwner, "Returns all in-memory token records as JSON"),
-		route("GET", "/v1/tokens/{sessionID}", appRouteLibraryHandlerOwner, "Returns one in-memory token record by sessionID as JSON"),
-		route("PUT", "/v1/tokens/{sessionID}", appRouteLibraryHandlerOwner, "Updates one in-memory token record by sessionID"),
+		{"GET", "/help", ownerApp, "RDAP help — advertises supported authentication providers"},
+		{"GET", "/", ownerApp, "Homepage — lists all configured login methods"},
+		{"GET", "/authorize", ownerApp, "Serves the OAuth sign-in/sign-up form (posts credentials to OAuth server)"},
+		{"GET", "/login/oauthserver", ownerLibrary, "Starts authorization code flow (default client)"},
+		{"GET", "/login/oauthserver?client_id=…&client_secret=…", ownerLibrary, "Starts authorization code flow (custom client credentials)"},
+		{"GET", "/login/{provider}", ownerLibrary, "Starts authorization code flow for any configured external provider"},
+		{"GET", "/callback/{provider}", ownerHook, "OAuth callback — library validates token, app hook stores session and sets cookie"},
+		{"GET", "/dashboard", ownerApp, "Protected dashboard (session cookie auth)"},
+		{"POST", "/dashboard/client", ownerApp, "Create a new OAuth client for the authenticated user"},
+		{"POST", "/dashboard/client/regenerate", ownerApp, "Regenerate the client secret"},
+		{"POST", "/dashboard/client/update", ownerApp, "Update the client's public key endpoint"},
+		{"POST", "/dashboard/client/delete", ownerApp, "Delete the client"},
+		{"GET", "/api/resource", ownerLibrary, "Protected resource via session cookie (RFC 6750)"},
+		{"GET", "/api/resource/bearer", ownerLibrary, "Protected resource via Bearer token (RFC 6750)"},
+		{"POST", "/signout", ownerLibrary, "Clears session cookie and redirects to home"},
+		{"GET", "/v1/tokens", ownerLibrary, "List all in-memory token records (JSON)"},
+		{"GET", "/v1/tokens/{sessionID}", ownerLibrary, "Get one token record by user subject (JSON)"},
+		{"POST", "/v1/tokens/store", ownerLibrary, "Manually store a token record"},
+		{"PUT", "/v1/tokens/{sessionID}", ownerLibrary, "Update a token record"},
 	}
 }
 
-func handleDashboard(auth *bettergoth.Auth, store *bettergoth.TokenStore, dashboardTemplate *template.Template, cookieName string, cookieSecure bool) http.Handler {
-	return bettergoth.AuthFromCookie(auth, cookieName, "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func handleDashboard(runtime *bettergoth.Runtime, tmpl *template.Template) http.Handler {
+	return bettergoth.AuthFromCookie(runtime.Auth, runtime.CookieName, "/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := bettergoth.UserFromContext(r.Context())
 		if !ok {
-			http.Error(w, "missing user from context", http.StatusInternalServerError)
+			http.Error(w, "missing user in context", http.StatusInternalServerError)
 			return
 		}
 
-		var details *bettergoth.TokenRecord
-		var accessToken string
-		if rec, found := store.Get(user.Subject); found {
-			details = &rec
-			accessToken = rec.AccessToken
+		var userDetails *bettergoth.TokenRecord
+		if rec, found := runtime.Store.Get(user.Subject); found {
+			userDetails = &rec
+		}
+
+		var client *oauthClientInfo
+		var clientError string
+		if userDetails != nil && userDetails.AccessToken != "" {
+			var err error
+			client, err = fetchClientInfo(userDetails.AccessToken, runtime.OAuthIssuer)
+			if err != nil {
+				clientError = fmt.Sprintf("could not load client info: %v", err)
+			}
 		}
 
 		data := dashboardData{
 			User:         user,
-			UserDetails:  details,
-			AccessToken:  accessToken,
-			CookieSecure: cookieSecure,
+			UserDetails:  userDetails,
 			Routes:       dashboardRoutes(),
+			CookieName:   runtime.CookieName,
+			CookieSecure: runtime.CookieSecure,
+			Client:       client,
+			ClientError:  clientError,
+			Flash:        r.URL.Query().Get("flash"),
+			OAuthIssuer:  strings.TrimRight(runtime.OAuthIssuer, "/"),
 		}
 
-		if err := dashboardTemplate.Execute(w, data); err != nil {
+		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, "failed to render dashboard", http.StatusInternalServerError)
-			return
 		}
 	}))
+}
+
+func fetchClientInfo(accessToken, oauthIssuer string) (*oauthClientInfo, error) {
+	issuer := strings.TrimRight(oauthIssuer, "/")
+	req, err := http.NewRequest(http.MethodGet, issuer+"/oauth/client", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusNotFound {
+		return nil, nil // no client registered yet
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OAuth server returned %d", resp.StatusCode)
+	}
+
+	var client oauthClientInfo
+	if err := json.NewDecoder(resp.Body).Decode(&client); err != nil {
+		return nil, err
+	}
+	return &client, nil
 }

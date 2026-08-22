@@ -5,21 +5,22 @@ import (
 	"net/http"
 )
 
-type homeData struct {
-	OAuthServerLoginPath string
-	GoogleLoginPath      string
-	SignupURL            string
+type providerOption struct {
+	Name      string
+	LoginPath string
+	Label     string
 }
 
-func handleHome(homeTemplate *template.Template, oauthServerLoginPath, googleLoginPath, signupURL string) func(w http.ResponseWriter, r *http.Request) {
+type homeData struct {
+	OAuthServerLoginPath string
+	OAuthServerEnabled   bool
+	ExternalProviders    []providerOption
+}
+
+func handleHome(tmpl *template.Template, data homeData) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := homeTemplate.Execute(w, homeData{
-			OAuthServerLoginPath: oauthServerLoginPath,
-			GoogleLoginPath:      googleLoginPath,
-			SignupURL:            signupURL,
-		}); err != nil {
+		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, "failed to render home page", http.StatusInternalServerError)
-			return
 		}
 	}
 }

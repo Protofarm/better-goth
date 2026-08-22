@@ -77,6 +77,8 @@ const (
 	JSONErrInvalidRedirectURI      = `{"error":"invalid_redirect_uri","error_description":"redirect_uri is not registered"}`
 	JSONErrUnauthorized            = `{"error":"unauthorized"}`
 	JSONErrInvalidToken            = `{"error":"invalid_token"}`
+	JSONErrInvalidState            = `{"error":"invalid_state"}`
+	JSONErrUserAlreadyExists       = `{"error":"user_already_exists", error_description:"username or email already taken"}`
 	JSONErrUserNotFound            = `{"error":"user_not_found"}`
 )
 

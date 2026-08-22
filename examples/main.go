@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	bettergoth "github.com/Protofarm/better-goth"
+	"github.com/Protofarm/better-goth/internal/providers"
 	"github.com/joho/godotenv"
 )
 
@@ -28,13 +29,19 @@ func main() {
 
 	runtime.Auth.SetAuthResultHandler(runtime.SessionAuthResultHandler("/dashboard"))
 
+	// The OAuth server is now API-only (no HTML). Override the oauthserver provider's
+	// authorization URL so the example app serves its own sign-in/sign-up form locally,
+	// which then POSTs credentials directly to the OAuth server's /authorize endpoint.
+	if p, ok := runtime.Auth.Providers[providers.OAuthServerProviderName]; ok {
+		p.Config().Endpoint.AuthURL = "http://localhost" + runtime.ListenAddr + "/authorize"
+	}
+
 	if err := registerExampleRoutes(mux, runtime); err != nil {
 		log.Fatal(err)
 	}
 
-	listenAddr := runtime.ListenAddr
-	log.Printf("Server running on %s", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, mux))
+	log.Printf("Server running on %s", runtime.ListenAddr)
+	log.Fatal(http.ListenAndServe(runtime.ListenAddr, mux))
 }
 
 func defaultConfigPath() string {
@@ -42,13 +49,11 @@ func defaultConfigPath() string {
 		"config.yaml",
 		filepath.Join("examples", "config.yaml"),
 	}
-
-	for _, candidate := range candidates {
-		if hasExampleAssets(candidate) {
-			return candidate
+	for _, c := range candidates {
+		if hasExampleAssets(c) {
+			return c
 		}
 	}
-
 	return candidates[0]
 }
 
@@ -56,11 +61,9 @@ func hasExampleAssets(configPath string) bool {
 	if _, err := os.Stat(configPath); err != nil {
 		return false
 	}
-
-	templateDir := filepath.Join(filepath.Dir(configPath), "templates")
-	if _, err := os.Stat(filepath.Join(templateDir, "home.html")); err != nil {
+	tmplDir := filepath.Join(filepath.Dir(configPath), "templates")
+	if _, err := os.Stat(filepath.Join(tmplDir, "home.html")); err != nil {
 		return false
 	}
-
 	return true
 }

@@ -41,20 +41,18 @@ type runtimeConfig struct {
 	CookieName   string
 	CookieSecure bool
 
-	OAuthEnabled             bool
-	OAuthIssuer              string
-	OAuthPort                string
-	OAuthClientID            string
-	OAuthClientSecret        string
-	OAuthKeyDir              string
-	OAuthRedirectURIs        []string
-	OAuthRedirectURL         string
-	OAuthCORSOrigins         []string
-	OAuthAuthHTMLPath        string
-	OAuthVerifyEmailHTMLPath string
-	OAuthTLSCertPath         string
-	OAuthTLSKeyPath          string
-	OAuthTLSEnabled          bool
+	OAuthEnabled      bool
+	OAuthIssuer       string
+	OAuthPort         string
+	OAuthClientID     string
+	OAuthClientSecret string
+	OAuthKeyDir       string
+	OAuthRedirectURIs []string
+	OAuthRedirectURL  string
+	OAuthCORSOrigins  []string
+	OAuthTLSCertPath  string
+	OAuthTLSKeyPath   string
+	OAuthTLSEnabled   bool
 
 	SMTP smtp.Config
 
@@ -205,17 +203,15 @@ func (ctx *setupContext) buildRuntimeConfig() runtimeConfig {
 		CookieName:   cookieName,
 		CookieSecure: cookieSecure,
 
-		OAuthEnabled:             oauthCfg.Enabled,
-		OAuthIssuer:              oauthIssuer,
-		OAuthPort:                oauthPort,
-		OAuthClientID:            oauthClientID,
-		OAuthClientSecret:        oauthClientSecret,
-		OAuthKeyDir:              ctx.resolveConfigPath(oauthCfg.KeyDir, "keys"),
-		OAuthAuthHTMLPath:        ctx.resolveConfigPath(oauthCfg.AuthHTMLPath, filepath.Join("oauth-server", "templates", "auth.html")),
-		OAuthVerifyEmailHTMLPath: ctx.resolveConfigPath(oauthCfg.VerifyEmailHTMLPath, filepath.Join("oauth-server", "templates", "verifyemail.html")),
-		OAuthTLSCertPath:         ctx.resolveConfigPath(oauthCfg.TLS.CertPath, ""),
-		OAuthTLSKeyPath:          ctx.resolveConfigPath(oauthCfg.TLS.KeyPath, ""),
-		OAuthTLSEnabled:          oauthCfg.TLS.Enabled,
+		OAuthEnabled:      oauthCfg.Enabled,
+		OAuthIssuer:       oauthIssuer,
+		OAuthPort:         oauthPort,
+		OAuthClientID:     oauthClientID,
+		OAuthClientSecret: oauthClientSecret,
+		OAuthKeyDir:       ctx.resolveConfigPath(oauthCfg.KeyDir, "keys"),
+		OAuthTLSCertPath:  ctx.resolveConfigPath(oauthCfg.TLS.CertPath, ""),
+		OAuthTLSKeyPath:   ctx.resolveConfigPath(oauthCfg.TLS.KeyPath, ""),
+		OAuthTLSEnabled:   oauthCfg.TLS.Enabled,
 
 		ExternalProviders: cfg.Providers.External,
 
@@ -264,17 +260,15 @@ func (ctx *setupContext) startOAuthServer() error {
 	}
 
 	oauthServer, err := oauthserver.CreateOAuthServer(ctx.db, oauthserver.ServerConfig{
-		Port:                rc.OAuthPort,
-		IssuerURL:           rc.OAuthIssuer,
-		KeyDir:              rc.OAuthKeyDir,
-		ClientID:            rc.OAuthClientID,
-		ClientSecret:        rc.OAuthClientSecret,
-		RedirectURIs:        rc.OAuthRedirectURIs,
-		AuthHTMLPath:        rc.OAuthAuthHTMLPath,
-		VerifyEmailHTMLPath: rc.OAuthVerifyEmailHTMLPath,
-		DevMode:             rc.DevMode,
-		SMTPConfig:          rc.SMTP,
-		CORSOrigins:         rc.OAuthCORSOrigins,
+		Port:         rc.OAuthPort,
+		IssuerURL:    rc.OAuthIssuer,
+		KeyDir:       rc.OAuthKeyDir,
+		ClientID:     rc.OAuthClientID,
+		ClientSecret: rc.OAuthClientSecret,
+		RedirectURIs: rc.OAuthRedirectURIs,
+		DevMode:      rc.DevMode,
+		SMTPConfig:   rc.SMTP,
+		CORSOrigins:  rc.OAuthCORSOrigins,
 	})
 	if err != nil {
 		return err

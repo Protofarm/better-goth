@@ -246,6 +246,23 @@ func (r *Runtime) IssueDeviceToken(userID string) (*TokenPair, error) {
 	return r.issue(userID, TokenUseDevice, DeviceTokenTTL, false)
 }
 
+// IssueExternalDeviceToken issues a device token for a subject the embedding app has already
+// authenticated through another identity provider, so it has no user row here.
+func (r *Runtime) IssueExternalDeviceToken(subject string) (*TokenPair, error) {
+	if err := r.requireAS(); err != nil {
+		return nil, err
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return nil, ErrUserNotFound
+	}
+	tok, err := handlers.IssueUserTokens(r.oauthStore, r.keyManager, r.OAuthIssuer, subject, r.OAuthClientID, "openid profile email", TokenUseDevice, DeviceTokenTTL, false)
+	if err != nil {
+		return nil, err
+	}
+	return tokenPair(tok, User{ID: subject}), nil
+}
+
 func (r *Runtime) IssueRecoveryToken(userID string) (*TokenPair, error) {
 	return r.issue(userID, TokenUseRecovery, RecoveryTokenTTL, false)
 }
